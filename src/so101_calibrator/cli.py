@@ -12,7 +12,7 @@ import time
 from . import __version__, render
 from . import checks as K
 from .ports import diff_ports, list_ports
-from .store import Store, StoreError, lerobot_calibration_path
+from .store import Store, StoreError
 from .wizard import Context, Session, Target
 
 TTY = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
@@ -37,6 +37,8 @@ class Env:
             from .mock import MockActor, load_rig
 
             self.rig_path = self.store.root / ".mock-rig.json"
+            # Simulated calibrations must never land in the real LeRobot cache.
+            self.store.lerobot_root = self.store.root / "mock-lerobot"
             self.rig = load_rig(self.rig_path, args.mock_faults)
             self.actor = MockActor(self.rig, speed=args.mock_speed)
 
@@ -344,7 +346,7 @@ def cmd_write(args, env: Env) -> int:
 
 
 def cmd_where(args, env: Env) -> int:
-    print(lerobot_calibration_path(args.role, args.id or args.role, legacy=args.legacy_export))
+    print(env.store.lerobot_path(args.role, args.id or args.role, legacy=args.legacy_export))
     return 0
 
 

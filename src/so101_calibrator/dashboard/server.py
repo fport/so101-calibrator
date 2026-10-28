@@ -63,7 +63,7 @@ class App:
             "arms": self.env.store.arms(),
             "mock": self.env.mock,
             "store": _tilde(self.env.store.root),
-            "lerobot_root": _tilde(lerobot_calibration_root()),
+            "lerobot_root": _tilde(self.env.store.lerobot_root or lerobot_calibration_root()),
         }
 
     def new_session(self, body: dict) -> dict:

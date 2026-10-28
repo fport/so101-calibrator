@@ -26,7 +26,9 @@ def test_calibrate_verify_history_diff_activate(capsys, tmp_path):
     assert code == 0 and "follower: v1 → v2" in out
     code, out = run(capsys, "activate", "follower", "1")
     assert code == 0 and "v1 is now active" in out
-    exported = tmp_path / "lerobot/robots/so_follower/follower.json"
+    # --mock never exports into the real LeRobot cache
+    assert not (tmp_path / "lerobot").exists()
+    exported = tmp_path / "store/mock-lerobot/robots/so_follower/follower.json"
     assert json.loads(exported.read_text()) == json.loads(run(capsys, "show", "follower", "1", "--json")[1])[
         "calibration"]
     code, out = run(capsys, "write", "follower")

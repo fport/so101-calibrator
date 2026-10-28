@@ -37,7 +37,7 @@ def lerobot_calibration_root() -> Path:
     return Path(hf_home).expanduser() / "lerobot" / "calibration"
 
 
-def lerobot_calibration_path(role: str, arm_id: str, legacy: bool = False) -> Path:
+def lerobot_calibration_path(role: str, arm_id: str, legacy: bool = False, root: Path | None = None) -> Path:
     """Where `lerobot-teleoperate --robot.id=<arm_id>` looks when no calibration_dir is given.
 
     LeRobot >= 0.4 keys the directory by device class (`so_follower`); older releases used the type
@@ -45,7 +45,7 @@ def lerobot_calibration_path(role: str, arm_id: str, legacy: bool = False) -> Pa
     """
     prof = PROFILES[role]
     sub = prof.lerobot_type if legacy else prof.lerobot_class_dir
-    return lerobot_calibration_root() / prof.lerobot_kind / sub / f"{arm_id}.json"
+    return (root or lerobot_calibration_root()) / prof.lerobot_kind / sub / f"{arm_id}.json"
 
 
 class StoreError(RuntimeError):
@@ -74,6 +74,11 @@ class Record:
 class Store:
     def __init__(self, root: str | Path | None = None):
         self.root = Path(root).expanduser() if root else default_store()
+        # Where export() writes without an explicit dest; None = the real LeRobot cache.
+        self.lerobot_root: Path | None = None
+
+    def lerobot_path(self, role: str, arm_id: str, legacy: bool = False) -> Path:
+        return lerobot_calibration_path(role, arm_id, legacy=legacy, root=self.lerobot_root)
 
     # --- arms ---------------------------------------------------------------------------------------
     def _arm_dir(self, arm_id: str) -> Path:
@@ -204,7 +209,7 @@ class Store:
         """
         rec = self.get(arm_id, version)
         target = (Path(dest).expanduser() / f"{arm_id}.json") if dest else \
-            lerobot_calibration_path(rec.data["role"], arm_id, legacy=legacy)
+            self.lerobot_path(rec.data["role"], arm_id, legacy=legacy)
         content = C.dump(rec.calibration)
         if target.exists() and target.read_text() != content:
             try:
