@@ -416,7 +416,7 @@ class DirectionStep(Step):
         paired = s.ctx.store.latest_directions(other, exclude_arm=s.targets[self.role].arm_id)
         if paired:
             checks += K.check_directions(self.signs, paired[1], f"{other} '{paired[0]}'")
-        prev = s.ctx.store.active(s.targets[self.role].arm_id)
+        prev = s.previous[self.role]
         prev_dirs = prev.data.get("directions") if prev else None
         if prev_dirs:
             checks += K.check_directions(self.signs, prev_dirs, "previous calibration")
@@ -488,7 +488,7 @@ class MatchStep(Step):
 
     def run(self, s):
         t = s.targets[self.role]
-        rec = s.ctx.store.active(t.arm_id)
+        rec = s.previous[self.role]
         if rec is None:
             return [K.Check("verify.stored", K.FAIL, f"No stored calibration for '{t.arm_id}'.",
                             f"Run `so101-cal calibrate {self.role} --id {t.arm_id}` or import an existing "
@@ -633,6 +633,8 @@ class Session:
         self.states: dict[str, StepState] = {st.id: StepState() for st in self.steps}
         self.events: list[dict] = []
         self.notices: list[str] = []  # shown after the run, e.g. "the motors hold an unsaved calibration"
+        # the version active when the run started: what checks compare against (read once, not per poll)
+        self.previous = {role: self.ctx.store.active(t.arm_id) for role, t in self.targets.items()}
         self.created = time.time()
         if self.steps:
             self._make_ready()
@@ -664,7 +666,7 @@ class Session:
         return P.profile(role, self.ctx.supply if role == "follower" else None)
 
     def previous_cal(self, role: str) -> C.Calibration | None:
-        rec = self.ctx.store.active(self.targets[role].arm_id)
+        rec = self.previous[role]
         return rec.calibration if rec else None
 
     def log(self, msg: str, level: str = "info") -> None:
@@ -872,7 +874,7 @@ class Session:
                 if cal is None and self.flow == "calibrate":
                     cal = self.draft.ranges()
                 if cal is None:
-                    prev = self.ctx.store.active(t.arm_id)
+                    prev = self.previous[role]
                     cal = prev.calibration if prev else None
                 live = self.live.get(role, {})
                 joints = {}

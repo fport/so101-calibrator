@@ -52,7 +52,7 @@ jobs:
           so101-cal --mock verify follower --yes
           so101-cal --mock teleop-test --seconds 3 --yes
           python -m so101_calibrator history
-          python -c "from so101_calibrator import assets; assert len(assets.frames('ranges')) > 10"
+          python -c "from so101_calibrator import assets; assert len(assets.frames('ranges', 'l')[0]) > 10"
       - uses: actions/upload-artifact@v4
         with:
           name: dist
