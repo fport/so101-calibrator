@@ -1,6 +1,10 @@
 # Changelog
 
-## 0.1.0 (unreleased)
+## 0.1.1
+
+- Shorter README with a hero image and badges, so the PyPI page matches GitHub. No code changes.
+
+## 0.1.0
 
 First release.
 
