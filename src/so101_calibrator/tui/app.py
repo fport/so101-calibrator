@@ -51,7 +51,7 @@ class CalApp(App):
         spec = AI.load_spec(env.store.root, ai_spec)
         if spec:
             try:
-                self.assistant = AI.Assistant(spec)
+                self.assistant = AI.Assistant(spec, store=env.store)
             except AI.AIError:
                 self.assistant = None
 
@@ -64,7 +64,7 @@ class CalApp(App):
         settings.update(self.env.store.root, lang=lang)
 
     def set_ai(self, spec: str) -> None:
-        self.assistant = AI.Assistant(spec)
+        self.assistant = AI.Assistant(spec, store=self.env.store)
         AI.save_spec(self.env.store.root, spec)
 
     def start_flow(self, flow: str, role: str) -> None:

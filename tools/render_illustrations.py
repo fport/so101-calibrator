@@ -38,7 +38,7 @@ DOCS = ROOT / "docs/so101"
 RENDER = 720  # square render size; a sprite pixel is a block x block square of it
 # Each size has a pixel box the clip must fit (a terminal cell shows 1 x 2 pixels) and the finest block
 # allowed; clips with wide motions get a coarser block, i.e. a smaller arm, instead of overflowing.
-SIZES = {"xl": ((100, 66), 5), "l": ((66, 44), 7), "s": ((44, 30), 11)}
+SIZES = {"xl": ((100, 66), 5), "l": ((66, 44), 7), "s": ((44, 30), 11), "xs": ((32, 20), 15)}
 FPS = 12
 BODY = {"shoulder_pan": "shoulder", "shoulder_lift": "upper_arm", "elbow_flex": "lower_arm",
         "wrist_flex": "wrist", "wrist_roll": "gripper", "gripper": "moving_jaw_so101_v1"}

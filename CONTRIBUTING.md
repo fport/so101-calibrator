@@ -25,11 +25,12 @@ uv run so101-cal --mock       # the TUI with a simulated leader + follower
 | `store.py` | Versioned JSON history (atomic writes), diff, activate (rollback), export to the LeRobot cache |
 | `env.py` | Real hardware or the mock, port lookup by USB serial |
 | `controller.py` | Runs a session on a poll thread for interactive front ends; cached snapshot, never blocks the UI |
-| `tui/` | Textual app: `screens.py` (home, wizard, history), `widgets.py` (animation, AI panel, joint bars) |
+| `tui/` | Textual app: `screens.py` (home, wizard, history), `widgets.py` (sprite, assistant panel, joint bars) |
+| `theme.py`, `i18n.py`, `settings.py` | Colours, English/Turkish texts, saved preferences |
 | `console.py`, `cli.py`, `render.py` | Line-based wizard and the commands |
 | `dashboard/` | Standard-library HTTP server + a framework-free static page |
-| `ai.py` | Optional helper: prompt from the snapshot, Ollama / OpenAI-compatible / Claude |
-| `assets/` | The SO-101 clips, made by `tools/render_illustrations.py` |
+| `ai.py` | Optional assistant: Strands agent (Ollama / OpenAI-compatible) with read-only tools, or Claude |
+| `assets/` | The SO-101 pixel-art clips (role sheets), made by `tools/render_illustrations.py` |
 
 Rules of thumb:
 
@@ -39,18 +40,27 @@ Rules of thumb:
   raise, and every exit path of a session ends in `Session.close()`, which releases torque.
 - Front ends send actions with the step id they displayed (`Session.act(action, step_id)`).
 
-## Re-rendering the animations
+## Re-rendering the SO-101 sprites
 
-The clips in `src/so101_calibrator/assets/so101/` (and the larger ones in `docs/so101/`) are rendered
-from the [SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) MuJoCo model:
+The clips in `src/so101_calibrator/assets/so101/` are made by `tools/render_illustrations.py` from the
+[SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) MuJoCo model:
 
 ```bash
-pip install mujoco pillow numpy
-python tools/render_illustrations.py /path/to/SO-ARM100/Simulation/SO101/so101_new_calib.xml
+pip install mujoco numpy pillow
+python tools/render_illustrations.py /path/to/SO-ARM100/Simulation/SO101/so101_new_calib.xml [--only ranges]
 ```
 
-The script checks with forward kinematics that every direction clip moves the way
-`profiles.DIRECTION_PROMPTS` describes.
+MuJoCo's segmentation render tells which link and which mesh (printed part or motor) each pixel shows;
+each block is reduced to its majority role, then a dot pattern, separators and a 1-pixel outline are
+added. The PNG sheets store roles (`assets.ROLES`), not colours: `theme.py` colours them at run time, so
+a new theme needs no re-render. The script also checks with forward kinematics that every direction clip
+moves the way `profiles.DIRECTION_PROMPTS` describes, and writes preview GIFs to `docs/so101/`.
+
+## Texts and languages
+
+UI texts and step hints live in `i18n.py` (English and Turkish). Steps return an i18n key from
+`hint_spec()`; `*word*` marks the word the TUI draws in the accent colour. A new language is a new table
+in `STRINGS`.
 
 ## Adding or tuning a check
 

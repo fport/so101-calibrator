@@ -1,7 +1,7 @@
 """SO-101 pixel-art clips, rendered from the official MuJoCo model by tools/render_illustrations.py.
 
 A clip is a paletted PNG sheet (frames stacked vertically) whose pixel values are *roles*, not colours;
-a theme maps roles to colours (tui.theme.Theme.sprite). Each clip exists in three sizes: "xl", "l" and "s".
+a theme maps roles to colours (tui.theme.Theme.sprite). Each clip exists in four sizes: "xl", "l", "s" and "xs".
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from importlib import resources
 
 ROLES = ("empty", "part", "part_dot", "motor", "motor_dot", "hi", "hi_dot", "hi_motor", "hi_motor_dot",
          "outline", "separator")
-SIZES = ("xl", "l", "s")  # largest first
+SIZES = ("xl", "l", "s", "xs")  # largest first
 
 
 def _dir():
@@ -21,7 +21,7 @@ def _dir():
 
 @lru_cache(maxsize=1)
 def index() -> dict:
-    """clip -> {"fps": int, "frames": int, "xl"/"l"/"s": [w, h]}"""
+    """clip -> {"fps": int, "frames": int, "xl"/"l"/"s"/"xs": [w, h]}"""
     return json.loads((_dir() / "index.json").read_text())
 
 

@@ -1,30 +1,34 @@
-"""Optional AI helper: explains the current step / failed checks and answers questions.
+"""Optional assistant: explains the current step or a failed check, and answers questions.
 
 Off unless configured. A spec is `provider[:model]`:
 
-    claude[:model]        Anthropic API (extra `ai`), key from ANTHROPIC_API_KEY or `ant auth login`
     ollama[:model]        local Ollama ($OLLAMA_HOST, default http://localhost:11434)
-    openai:model          any OpenAI-compatible server: $SO101CAL_AI_URL (e.g. LM Studio
-                          http://localhost:1234/v1, llama.cpp, vLLM) or api.openai.com with $OPENAI_API_KEY
+    openai:model          any OpenAI-compatible server: $SO101CAL_AI_URL (LM Studio http://localhost:1234/v1,
+                          llama.cpp, vLLM) or api.openai.com with $OPENAI_API_KEY
+    claude[:model]        Anthropic API, key from ANTHROPIC_API_KEY or `ant auth login`
 
-Set it with `so101-cal ai use <spec>` (stored in <store>/config.json), `--ai <spec>` or $SO101CAL_AI.
-Only the calibration state shown in the tool (step, check results, joint readings) is sent.
+Local and OpenAI-compatible models run as a Strands agent (strands-agents) with read-only tools over the
+calibration history; Claude runs on the Anthropic SDK. Both come with `pip install "so101-calibrator[ai]"`.
+Set the model with `so101-cal ai use <spec>`, `--ai <spec>` or $SO101CAL_AI. The assistant only sees what the
+tool shows (steps, check results, joint readings, stored versions); it has no tool that moves the arm.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
-from . import settings
+from . import i18n, settings
 from .profiles import JOINTS
+from .store import Store, StoreError
 
-PROVIDERS = ("claude", "ollama", "openai")
+PROVIDERS = ("ollama", "openai", "claude")
 CLAUDE_MODEL = "claude-opus-5-5"
+INSTALL_HINT = 'pip install "so101-calibrator[ai]"'
+LANG_NAMES = {"en": "English", "tr": "Turkish"}
 
 SYSTEM = """You are the assistant inside so101-calibrator, a tool that calibrates SO-101 robot arms
 (LeRobot compatible, Feetech STS3215 servos, 12-bit encoders 0..4095, 6 joints: shoulder_pan, shoulder_lift,
@@ -41,7 +45,7 @@ You get the tool's current state as JSON. Answer the user's question about it.
 - Be brief: at most 5 short lines or bullets. Concrete physical actions first ("unplug...", "move...").
 - Answer in the language the user writes in. If the question is empty, explain the most important
   warning or failure in the state and how to fix it; if there is none, say what to do next in one line.
-- Use only the numbers in the state; do not invent register values or readings.
+- Use only the numbers in the state or from your tools; do not invent register values or readings.
 - After fixing a failed step the user presses Retry (Enter) to repeat just that step; never tell them to
   restart the whole calibration. A warning can be accepted to continue.
 - Safety: unplug power before touching wiring; keep hands clear when follower torque is on."""
@@ -97,37 +101,138 @@ def describe(snapshot: dict | None, arms: list[dict] | None = None) -> dict:
     return out
 
 
-# --- providers ---------------------------------------------------------------------------------------
+# --- read-only tools for the agent -------------------------------------------------------------------
+def history_tools(store: Store) -> list:
+    """Strands tools over the calibration history. Read-only on purpose: nothing here touches hardware."""
+    from strands import tool
+
+    @tool
+    def calibration_history(arm_id: str) -> str:
+        """All stored calibration versions of an arm ("follower", "leader" or another id): version, date,
+        source, note, active flag and how many checks passed, warned or failed."""
+        try:
+            info = store.arm(arm_id)
+            if info is None:
+                known = ", ".join(a["arm_id"] for a in store.arms()) or "none"
+                return f"error: no calibrations stored for '{arm_id}' (known arms: {known})"
+            return json.dumps([{**r.summary(), "active": r.version == info.get("active")}
+                               for r in store.versions(arm_id)])
+        except StoreError as e:
+            return f"error: {e}"
+
+    @tool
+    def compare_versions(arm_id: str, a: int, b: int) -> str:
+        """Per-joint differences (homing offset, range min/max, in encoder ticks) between two stored versions."""
+        try:
+            return json.dumps(store.diff(arm_id, a, b))
+        except StoreError as e:
+            return f"error: {e}"
+
+    return [calibration_history, compare_versions]
+
+
+# --- the assistant -------------------------------------------------------------------------------------
 @dataclass
 class Assistant:
     spec: str
-    history: list[dict] = field(default_factory=list)  # user/assistant turns of this conversation
+    store: Store | None = None  # gives local models the history tools
     timeout: float = 120.0
+    history: list[dict] = field(default_factory=list)  # Claude conversation (Strands keeps its own)
 
     def __post_init__(self):
         self.provider, self.model = parse_spec(self.spec)
         if self.provider == "claude" and not self.model:
             self.model = CLAUDE_MODEL
+        self._agent: Any = None
+        self._on_text: Callable[[str], None] = lambda _: None
+        self._text = ""
 
     @property
     def label(self) -> str:
         return f"{self.provider}:{self.model}" if self.model else self.provider
 
-    def ask(self, question: str, state: dict, on_text: Callable[[str], None] | None = None) -> str:
+    def ask(self, question: str, state: dict, on_text: Callable[[str], None] | None = None,
+            lang: str | None = None) -> str:
         """Answer `question` about `state`. `on_text` gets the answer so far while it streams in."""
-        user = f"State:\n{json.dumps(state, separators=(',', ':'))}\n\nQuestion: {question.strip() or '(none)'}"
-        messages = [*self.history[-6:], {"role": "user", "content": user}]
-        answer = getattr(self, f"_ask_{self.provider}")(messages, on_text or (lambda _: None)).strip()
-        # keep only the question text in history; the next turn carries the fresh state
-        self.history += [{"role": "user", "content": question.strip() or "Explain the current problem."},
-                         {"role": "assistant", "content": answer}]
-        return answer
+        language = LANG_NAMES.get(lang or i18n.get_lang(), "English")
+        prompt = (f"State:\n{json.dumps(state, separators=(',', ':'))}\n\n"
+                  f"Question: {question.strip() or f'(none: explain the current problem, in {language})'}")
+        on_text = on_text or (lambda _: None)
+        if self.provider == "claude":
+            return self._ask_claude(question, prompt, on_text).strip()
+        return self._ask_strands(prompt, on_text).strip()
 
-    def _ask_claude(self, messages: list[dict], on_text) -> str:
+    # --- Strands: Ollama and OpenAI-compatible servers -------------------------------------------------
+    def _model(self):
+        if self.provider == "ollama":
+            from strands.models.ollama import OllamaModel
+
+            host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+            host = host if host.startswith("http") else f"http://{host}"
+            if not self.model:
+                self.model = self._first_ollama_model(host)
+            # thinking models (qwen3, deepseek-r1) take minutes per answer with thinking on
+            return OllamaModel(host, model_id=self.model, keep_alive="10m", additional_args={"think": False},
+                               ollama_client_args={"timeout": self.timeout})
+        from strands.models.openai import OpenAIModel
+
+        return OpenAIModel(client_args={"base_url": os.environ.get("SO101CAL_AI_URL", "https://api.openai.com/v1"),
+                                        "api_key": os.environ.get("OPENAI_API_KEY") or "not-needed",
+                                        "timeout": self.timeout},
+                           model_id=self.model)
+
+    def _first_ollama_model(self, host: str) -> str:
+        import ollama
+
+        try:
+            names = [m.model for m in ollama.Client(host, timeout=10).list().models]
+        except Exception as e:
+            raise AIError(f"Cannot reach Ollama at {host} (is `ollama serve` running?)") from e
+        if not names:
+            raise AIError("Ollama has no models: ollama pull qwen2.5 (or llama3.2)")
+        return names[0]
+
+    def _make_agent(self, with_tools: bool):
+        from strands import Agent
+
+        def stream(**event):  # Strands callback: text chunks arrive as "data"
+            if "data" in event:
+                self._text += event["data"]
+                self._on_text(self._text)
+
+        tools = history_tools(self.store) if with_tools and self.store is not None else []
+        return Agent(model=self._model(), system_prompt=SYSTEM, tools=tools, callback_handler=stream)
+
+    def _ask_strands(self, prompt: str, on_text: Callable[[str], None]) -> str:
+        try:
+            import strands  # noqa: F401
+        except ImportError as e:
+            raise AIError(f"Local and OpenAI-compatible models need Strands Agents: {INSTALL_HINT}") from e
+        self._on_text, self._text = on_text, ""
+        try:
+            if self._agent is None:
+                self._agent = self._make_agent(with_tools=True)
+            try:
+                result = self._agent(prompt)
+            except Exception as e:
+                if "does not support tools" not in str(e):
+                    raise
+                self._agent = self._make_agent(with_tools=False)  # small models: answer from the state alone
+                self._text = ""
+                result = self._agent(prompt)
+        except AIError:
+            raise
+        except Exception as e:
+            raise AIError(_explain(e, self.provider)) from e
+        return self._text or str(result)
+
+    # --- Claude: Anthropic SDK -------------------------------------------------------------------------
+    def _ask_claude(self, question: str, prompt: str, on_text: Callable[[str], None]) -> str:
         try:
             import anthropic
         except ImportError as e:
-            raise AIError('Claude needs the Anthropic SDK: pip install "so101-calibrator[ai]"') from e
+            raise AIError(f"Claude needs the Anthropic SDK: {INSTALL_HINT}") from e
+        messages = [*self.history[-6:], {"role": "user", "content": prompt}]
         try:
             client = anthropic.Anthropic(timeout=self.timeout)
             with client.beta.messages.stream(
@@ -154,92 +259,20 @@ class Assistant:
             raise AIError("Cannot reach the Anthropic API (offline?)") from e
         if resp.stop_reason == "refusal":
             raise AIError("Claude declined to answer this one.")
-        return "".join(b.text for b in resp.content if b.type == "text")
-
-    def _ask_ollama(self, messages: list[dict], on_text) -> str:
-        host = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
-        if not host.startswith("http"):
-            host = f"http://{host}"
-        if not self.model:
-            tags = _http_json(f"{host}/api/tags", None, self.timeout, "Ollama")
-            names = [m["name"] for m in tags.get("models", [])]
-            if not names:
-                raise AIError("Ollama has no models: ollama pull qwen2.5 (or llama3.2)")
-            self.model = names[0]
-        # Thinking models (qwen3, deepseek-r1...) take minutes per answer with thinking on; a short
-        # explanation does not need it. Models without a thinking mode reject the flag: retry without.
-        body = {"model": self.model, "stream": True, "think": False,
-                "messages": [{"role": "system", "content": SYSTEM}, *messages]}
-        try:
-            lines = _http_lines(f"{host}/api/chat", body, self.timeout, "Ollama")
-        except AIError as e:
-            if "think" not in str(e):
-                raise
-            body.pop("think")
-            lines = _http_lines(f"{host}/api/chat", body, self.timeout, "Ollama")
-        text = ""
-        for line in lines:
-            chunk = json.loads(line)
-            if chunk.get("error"):
-                raise AIError(f"Ollama: {chunk['error']}")
-            text += chunk.get("message", {}).get("content", "")
-            on_text(text)
-            if chunk.get("done"):
-                break
-        return text
-
-    def _ask_openai(self, messages: list[dict], on_text) -> str:
-        base = os.environ.get("SO101CAL_AI_URL", "https://api.openai.com/v1").rstrip("/")
-        headers = {}
-        if os.environ.get("OPENAI_API_KEY"):
-            headers["Authorization"] = f"Bearer {os.environ['OPENAI_API_KEY']}"
-        body = {"model": self.model, "messages": [{"role": "system", "content": SYSTEM}, *messages]}
-        data = _http_json(f"{base}/chat/completions", body, self.timeout, base, headers)
-        try:
-            text = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError) as e:
-            raise AIError(f"Unexpected answer from {base}") from e
-        on_text(text)
-        return text
+        answer = "".join(b.text for b in resp.content if b.type == "text")
+        # keep only the question text in history; the next turn carries the fresh state
+        self.history += [{"role": "user", "content": question.strip() or "Explain the current problem."},
+                         {"role": "assistant", "content": answer}]
+        return answer
 
 
-def _request(url: str, body: dict | None, headers: dict | None) -> urllib.request.Request:
-    return urllib.request.Request(url, data=json.dumps(body).encode() if body is not None else None,
-                                  headers={"Content-Type": "application/json", **(headers or {})})
-
-
-def _translate(e: Exception, name: str, timeout: float) -> AIError:
-    if isinstance(e, urllib.error.HTTPError):
-        return AIError(f"{name} answered {e.code}: {e.read().decode(errors='replace')[:200]}")
-    if isinstance(e, TimeoutError) or isinstance(getattr(e, "reason", None), TimeoutError):
-        return AIError(f"{name} did not answer within {timeout:.0f} s (a large model loading for the first time "
-                       "can be slow; try again or use a smaller model)")
-    hint = " (is `ollama serve` running?)" if name == "Ollama" else ""
-    return AIError(f"Cannot reach {name}{hint}")
-
-
-def _http_json(url: str, body: dict | None, timeout: float, name: str, headers: dict | None = None) -> dict:
-    try:
-        with urllib.request.urlopen(_request(url, body, headers), timeout=timeout) as r:
-            return json.loads(r.read())
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-        raise _translate(e, name, timeout) from e
-
-
-def _http_lines(url: str, body: dict, timeout: float, name: str):
-    """Yield the non-empty lines of a streamed (NDJSON) response."""
-    try:
-        r = urllib.request.urlopen(_request(url, body, None), timeout=timeout)
-    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
-        raise _translate(e, name, timeout) from e
-
-    def gen():
-        with r:
-            try:
-                for line in r:
-                    if line.strip():
-                        yield line
-            except (TimeoutError, ConnectionError) as e:
-                raise _translate(e, name, timeout) from e
-
-    return gen()
+def _explain(e: Exception, provider: str) -> str:
+    text = f"{type(e).__name__}: {e}"
+    low = text.lower()
+    if provider == "ollama" and ("connect" in low or "refused" in low):
+        return "Cannot reach Ollama (is `ollama serve` running?)"
+    if "not found" in low and provider == "ollama":
+        return f"{text} (ollama pull <model>?)"
+    if "timeout" in low or "timed out" in low:
+        return "The model did not answer in time (a large model loading for the first time can be slow)"
+    return text

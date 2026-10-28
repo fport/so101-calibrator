@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from datetime import datetime
 from functools import lru_cache
@@ -45,6 +46,11 @@ def emphasis(text: str, style: str, accent: str | None = None) -> Text:
     for i, part in enumerate(text.split("*")):
         out.append(part, style=f"{style} {accent or THEME.accent}" if i % 2 else style)
     return out
+
+
+def from_markdown(text: str) -> str:
+    """Model answers use Markdown: **bold** becomes an *emphasis* mark, single asterisks become bullets."""
+    return re.sub(r"(?<!\*)\*(?!\*)", "•", text).replace("**", "*")
 
 
 def keys(*pairs: tuple[str, str], first_is_primary: bool = True) -> Text:
@@ -196,7 +202,7 @@ class AIPanel(Vertical):
     AIPanel {{ height: auto; max-height: 14; width: 90; border: round {THEME.dim}; padding: 0 1; display: none;
                margin: 0 0 1 0; }}
     AIPanel #ai-answer {{ height: auto; }}
-    AIPanel Input {{ border: none; height: 1; padding: 0; background: {THEME.surface}; }}
+    AIPanel Input, AIPanel Input:focus {{ border: none; height: 1; padding: 0 1; background: {THEME.surface}; }}
     """
 
     def compose(self) -> ComposeResult:
@@ -221,7 +227,7 @@ class AIPanel(Vertical):
         self.screen.focus_next()
 
     def say(self, text: str, style: str = "") -> None:
-        self.query_one("#ai-answer", Static).update(Text(text, style=style or THEME.fg))
+        self.query_one("#ai-answer", Static).update(emphasis(from_markdown(text), style or THEME.fg))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         app = self.cal_app

@@ -1,8 +1,9 @@
 # so101-calibrator
 
 Step-by-step, **checked** and **versioned** calibration for the SO-101 leader and follower arms,
-compatible with [LeRobot](https://github.com/huggingface/lerobot). Type `so101-cal` and a terminal UI
-shows you, with an animated SO-101, what to do at every step; **Enter** goes on.
+compatible with [LeRobot](https://github.com/huggingface/lerobot). Type `so101-cal`: one screen per step,
+a pixel-art SO-101 with the joint to move in orange, one sentence, and **Enter** to go on. In English or
+Turkish (`l`).
 
 ![The terminal UI asking for the elbow to be unfolded, with the joint highlighted on the arm](https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-direction.png)
 
@@ -24,7 +25,8 @@ so101-cal                               # then with your arms plugged in
 ```
 
 Everything needed for real STS3215 motors is included. `pip install "so101-calibrator[ai]"` adds the
-Anthropic SDK for the optional Claude helper.
+optional assistant ([Strands Agents](https://strandsagents.com) for local models, the Anthropic SDK for
+Claude).
 
 ## What it does
 
@@ -40,8 +42,11 @@ Anthropic SDK for the optional Claude helper.
   | Directions | Which way each encoder counts, compared with the paired arm and with the previous calibration (catches a reversed motor or flipped horn) |
   | Save | Valid LeRobot format, written to the motors and read back, stored as a new version, exported |
 
-- **Animated instructions.** Each step plays a short clip of the SO-101, rendered from the official
-  MuJoCo model, with the joint to move drawn in orange. It works in any terminal with true color.
+- **Shows what to do.** Each step plays a short pixel-art clip of the SO-101, made from the official
+  MuJoCo model, with only the joint to move drawn in orange. It works in any terminal with true color,
+  and picks the largest of four sizes that fits the window.
+- **English and Turkish**: `l` switches the language and remembers it (default: your locale, or
+  `--lang en|tr`). Check messages are English for now.
 - **Verify** an existing calibration: the motor EEPROM still matches the active version, and the arm
   put back in the middle pose reads ~2047 on every joint.
 - **Teleop test**: refuses to start unless leader and follower are in the same pose (otherwise the
@@ -49,8 +54,9 @@ Anthropic SDK for the optional Claude helper.
 - **History**: every calibration is stored with its timestamp, role, USB serial, port, note and check
   results. You can list, show, diff and roll back versions, export to the LeRobot cache or any
   `calibration_dir`, and import existing LeRobot files.
-- **Optional AI helper**: explains a failed check or answers a question about the current state, in
-  your language. It runs on a local model (Ollama, LM Studio, llama.cpp) or on Claude.
+- **Optional assistant**: explains a failed check or answers a question about the current state or the
+  calibration history, in your language. Local models (Ollama, LM Studio, llama.cpp) run as a
+  [Strands](https://strandsagents.com) agent with read-only tools; Claude runs on the Anthropic SDK.
 - **Mock hardware**: a simulated leader + follower (register-level STS3215 emulation and a "hand" that
   moves the arm) with fault injection. Every test runs on it, and you can try the whole tool without an arm.
 - The same wizard also runs as **plain CLI commands** for scripts, and as a local **web dashboard**
@@ -106,14 +112,16 @@ so101-cal calibrate leader --id leader
 so101-cal teleop-test
 ```
 
-## AI helper (optional)
+## Assistant (optional)
 
 ![A local model explaining a failed supply check](https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-ai.png)
 
 Press `a` and ask a question, or press Enter on an empty line to have the current problem explained.
-The model sees only what the screen shows (steps, check results and fixes, joint readings). It answers
-briefly, in the language you write in, and it only explains: it never moves the arm or changes a
-calibration. The helper is off until you pick a model:
+The model sees what the screen shows (steps, check results and fixes, joint readings). Local and
+OpenAI-compatible models run as a [Strands](https://strandsagents.com) agent that can also look up the
+calibration history and compare two versions ("what changed since last week?"); both tools are
+read-only. The assistant answers briefly, in your language, and only explains: it has no tool that moves
+the arm or changes a calibration. It is off until you pick a model (`pip install "so101-calibrator[ai]"`):
 
 ```bash
 so101-cal ai use ollama                 # local: the first model `ollama list` shows (or ollama:qwen2.5 ...)
@@ -124,8 +132,9 @@ so101-cal ai ask "why does my gripper only open halfway?"
 so101-cal ai off
 ```
 
-You can also type the model into the AI box the first time, pass `--ai SPEC`, or set `$SO101CAL_AI`.
-Ollama runs thinking models (qwen3, deepseek-r1) with thinking off, so answers come back in seconds.
+You can also type the model into the assistant box the first time, pass `--ai SPEC`, or set
+`$SO101CAL_AI`. Ollama runs thinking models (qwen3, deepseek-r1) with thinking off, so answers come back
+in seconds; models without tool support answer from the screen state alone.
 The Claude helper uses `claude-opus-5-5` at low effort, with Anthropic's server-side refusal fallback;
 pick another model with `claude:<model>`.
 
@@ -207,7 +216,7 @@ between minor versions until 1.0.
 | "Missing motor id(s): 4" | Loose daisy-chain cable going into that motor |
 | Direction mismatch on one joint | Motor or horn mounted the other way round on one arm |
 | Verify: EEPROM differs | Motor replaced, or another tool wrote a different calibration: recalibrate or `so101-cal write` |
-| The animation looks blocky | It is drawn with text characters; a larger terminal window gives it more pixels |
+| The arm looks small | It is drawn with text characters; a larger terminal window gets a larger sprite |
 
 ## Contributing
 
@@ -216,5 +225,5 @@ from real arms that help tune the thresholds in `profiles.py` are very welcome.
 
 ## License
 
-[MIT](https://github.com/fport/so101-calibrator/blob/main/LICENSE). The SO-101 animations are rendered
+[MIT](https://github.com/fport/so101-calibrator/blob/main/LICENSE). The SO-101 pixel art is rendered
 from the [SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) model (Apache-2.0).

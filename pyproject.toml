@@ -1,7 +1,7 @@
 [project]
 name = "so101-calibrator"
 dynamic = ["version"]
-description = "Checked, versioned calibration for SO-101 robot arms (LeRobot compatible), with a terminal UI."
+description = "Checked, versioned calibration for SO-101 robot arms (LeRobot compatible), with a simple terminal UI."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -32,7 +32,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ai = ["anthropic>=2.3.0"]  # only for the Claude helper; Ollama / OpenAI-compatible servers need nothing
+ai = [  # the optional assistant: Strands Agents for local models, the Anthropic SDK for Claude
+    "anthropic>=2.3.0",
+    "strands-agents[ollama,openai]>=1.0",
+]
 
 [project.scripts]
 so101-cal = "so101_calibrator.cli:main"

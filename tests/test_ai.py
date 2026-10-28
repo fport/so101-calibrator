@@ -8,48 +8,65 @@ import pytest
 from so101_calibrator import ai as AI
 from so101_calibrator.cli import main
 from so101_calibrator.mock import MockRig
+from so101_calibrator.store import Store
 
 from .conftest import calibrate
+
+ANSWER = ["Plug ", "in ", "12 V."]
 
 
 @pytest.fixture
 def fake_server(monkeypatch):
-    """A tiny Ollama + OpenAI-compatible server; records request bodies."""
+    """Speaks enough of the Ollama (/api/*, NDJSON) and OpenAI (/v1/*, SSE) streaming protocols."""
     seen: list[dict] = []
-    reject_think = {"on": False}
+    options = {"reject_tools": False}
 
     class H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
         def log_message(self, *a):
             pass
 
         def _send(self, code, payload: bytes, ctype="application/json"):
             self.send_response(code)
             self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
 
         def do_GET(self):
-            self._send(200, json.dumps({"models": [{"name": "tiny:1b"}]}).encode())
+            self._send(200, json.dumps({"models": [{"name": "tiny:1b", "model": "tiny:1b"}]}).encode())
 
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append(body)
             if self.path == "/api/chat":
-                if reject_think["on"] and "think" in body:
-                    self._send(400, b'{"error":"\\"tiny:1b\\" does not support thinking"}')
+                if options["reject_tools"] and body.get("tools"):
+                    self._send(400, b'{"error":"registry.ollama.ai/library/tiny:1b does not support tools"}')
                     return
-                lines = [{"message": {"content": w}, "done": False} for w in ("Plug ", "in ", "12 V.")]
-                lines.append({"message": {"content": ""}, "done": True})
+                chunk = {"model": "tiny:1b", "created_at": "2026-01-01T00:00:00Z", "done": False}
+                lines = [{**chunk, "message": {"role": "assistant", "content": w}} for w in ANSWER]
+                lines.append({**chunk, "message": {"role": "assistant", "content": ""}, "done": True,
+                              "done_reason": "stop", "total_duration": 1000, "prompt_eval_count": 5,
+                              "eval_count": 3, "eval_duration": 1})
                 self._send(200, b"".join(json.dumps(x).encode() + b"\n" for x in lines), "application/x-ndjson")
-            else:
-                self._send(200, json.dumps({"choices": [{"message": {"content": "OK from openai"}}]}).encode())
+            else:  # /v1/chat/completions
+                base = {"id": "x", "object": "chat.completion.chunk", "created": 1, "model": body["model"]}
+                events = [{**base, "choices": [{"index": 0, "delta": {"role": "assistant", "content": w},
+                                                "finish_reason": None}]} for w in ("OK ", "from ", "openai")]
+                events.append({**base, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})
+                events.append({**base, "choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 3,
+                                                                "total_tokens": 4}})
+                sse = b"".join(b"data: " + json.dumps(e).encode() + b"\n\n" for e in events) + b"data: [DONE]\n\n"
+                self._send(200, sse, "text/event-stream")
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}"
     monkeypatch.setenv("OLLAMA_HOST", url)
     monkeypatch.setenv("SO101CAL_AI_URL", url + "/v1")
-    yield SimpleNamespace(url=url, seen=seen, reject_think=reject_think)
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    yield SimpleNamespace(url=url, seen=seen, options=options)
     srv.shutdown()
 
 
@@ -84,29 +101,46 @@ def test_describe_session_snapshot(store):
     json.dumps(state)  # must be serializable as the prompt
 
 
-def test_ollama_streams_and_picks_first_model(fake_server):
-    a = AI.Assistant("ollama")
+def test_ollama_agent_streams_with_tools_and_thinking_off(fake_server, store):
+    pytest.importorskip("strands")
+    calibrate(store, MockRig.create(), "follower", port_known=True)
+    a = AI.Assistant("ollama", store=store)
     partial: list[str] = []
-    assert a.ask("", {"flow": "calibrate"}, on_text=partial.append) == "Plug in 12 V."
+    assert a.ask("", {"flow": "calibrate"}, on_text=partial.append, lang="tr") == "Plug in 12 V."
     assert a.model == "tiny:1b" and partial[0] == "Plug " and partial[-1] == "Plug in 12 V."
     body = fake_server.seen[-1]
-    assert body["think"] is False and body["messages"][0]["role"] == "system"
-    a.ask("again?", {})
-    assert [m["role"] for m in fake_server.seen[-1]["messages"]] == ["system", "user", "assistant", "user"]
+    assert body["think"] is False
+    assert {t["function"]["name"] for t in body["tools"]} == {"calibration_history", "compare_versions"}
+    assert "in Turkish" in body["messages"][-1]["content"]  # empty question: answer in the UI language
 
 
-def test_ollama_retries_without_think(fake_server):
-    fake_server.reject_think["on"] = True
-    assert AI.Assistant("ollama:tiny:1b").ask("", {}) == "Plug in 12 V."
-    assert "think" not in fake_server.seen[-1]
+def test_ollama_model_without_tool_support(fake_server, store):
+    pytest.importorskip("strands")
+    fake_server.options["reject_tools"] = True
+    assert AI.Assistant("ollama:tiny:1b", store=store).ask("hi", {}) == "Plug in 12 V."
+    assert not fake_server.seen[-1].get("tools")
+
+
+def test_history_tools_are_read_only(store):
+    pytest.importorskip("strands")
+    calibrate(store, MockRig.create(), "follower", port_known=True)
+    calibrate(store, MockRig.create(), "follower", port_known=True)
+    tools = {t.tool_name: t for t in AI.history_tools(store)}
+    assert set(tools) == {"calibration_history", "compare_versions"}
+    versions = json.loads(tools["calibration_history"]("follower"))
+    assert [v["version"] for v in versions] == [1, 2] and versions[1]["active"]
+    assert isinstance(json.loads(tools["compare_versions"]("follower", 1, 2)), list)
+    assert tools["calibration_history"]("nope").startswith("error")
 
 
 def test_openai_compatible(fake_server):
+    pytest.importorskip("strands")
     assert AI.Assistant("openai:local-model").ask("hi", {}) == "OK from openai"
     assert fake_server.seen[-1]["model"] == "local-model"
 
 
 def test_unreachable_server(monkeypatch):
+    pytest.importorskip("strands")
     monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
     with pytest.raises(AI.AIError, match="ollama serve"):
         AI.Assistant("ollama:x").ask("", {})
@@ -144,6 +178,7 @@ def test_claude_request_shape(monkeypatch):
 
 
 def test_cli_ai_commands(capsys, fake_server, monkeypatch):
+    pytest.importorskip("strands")
     monkeypatch.delenv("SO101CAL_AI", raising=False)
     assert main(["ai"]) == 0 and "off" in capsys.readouterr().out
     assert main(["ai", "use", "ollama:tiny:1b"]) == 0
@@ -153,3 +188,7 @@ def test_cli_ai_commands(capsys, fake_server, monkeypatch):
     assert main(["ai", "use", "nope"]) == 2
     assert main(["ai", "off"]) == 0
     assert main(["ai", "ask", "x"]) == 2
+
+
+def test_store_fixture_is_isolated(store):
+    assert isinstance(store, Store) and not store.arms()

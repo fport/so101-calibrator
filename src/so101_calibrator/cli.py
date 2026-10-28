@@ -215,7 +215,7 @@ def cmd_ai(args, env: Env) -> int:
         if not spec:
             print("AI helper is off: so101-cal ai use ollama | claude | openai:<model>", file=sys.stderr)
             return 2
-        print(AI.Assistant(spec).ask(" ".join(args.arg), AI.describe(None, env.store.arms())))
+        print(AI.Assistant(spec, store=env.store).ask(" ".join(args.arg), AI.describe(None, env.store.arms())))
         return 0
     except AI.AIError as e:
         print(f"error: {e}", file=sys.stderr)
