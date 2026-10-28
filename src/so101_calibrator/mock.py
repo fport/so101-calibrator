@@ -155,6 +155,11 @@ class MockBus:
         self.arm.set_pose(joint, sign * delta / self.arm.half_span[joint])
 
 
+def _plateau(x: float) -> float:
+    """A sine with flat tops: holds at +-1 for about a third of each half wave."""
+    return max(-1.0, min(1.0, 1.6 * x))
+
+
 class MockHand:
     """Moves a MockArm the way a person would during each wizard step."""
 
@@ -197,8 +202,9 @@ class MockHand:
     def _run(self, script: str, joint: str | None) -> None:
         t0 = time.monotonic()
         while not self._stop.is_set():
-            # moves must stay slow enough for a ~25 Hz poller to see the end stops and each nudge
-            t = (time.monotonic() - t0) * min(self.speed, 2.0 if script == "directions" else 4.0)
+            # moves must stay slow enough for a poller to see the end stops and each nudge, also on a slow
+            # CI machine: the hand is capped at 2x and rests briefly at every extreme (flat-topped waves)
+            t = (time.monotonic() - t0) * min(self.speed, 2.0)
             if script == "sweep":
                 # one joint after another, ~2.5 s each, then rest in the middle
                 order = [j for j in JOINTS if j not in FULL_TURN_JOINTS]
@@ -208,7 +214,7 @@ class MockHand:
                     return
                 for k, j in enumerate(order):
                     if k == idx:
-                        self.arm.set_pose(j, math.sin((t % 2.5) / 2.5 * 2 * math.pi) * 1.05)
+                        self.arm.set_pose(j, _plateau(math.sin((t % 2.5) / 2.5 * 2 * math.pi)) * 1.05)
                     elif k < idx:
                         self.arm.set_pose(j, 0.0)
             elif script == "nudge" and joint:
@@ -221,7 +227,7 @@ class MockHand:
                 if idx >= len(JOINTS):
                     return
                 j, phase = JOINTS[idx], (t % 0.8) / 0.8
-                self.arm.set_pose(j, 0.35 * math.sin(phase * math.pi))
+                self.arm.set_pose(j, 0.35 * _plateau(math.sin(phase * math.pi)))
                 for k in range(idx):
                     self.arm.set_pose(JOINTS[k], 0.0)
             elif script == "wander":
