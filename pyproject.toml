@@ -1,7 +1,7 @@
 [project]
 name = "so101-calibrator"
 version = "0.1.0"
-description = "Step-by-step, checked and versioned calibration for SO-101 leader/follower arms (LeRobot compatible), with a CLI and a local web dashboard."
+description = "Step-by-step, checked and versioned calibration for SO-101 leader/follower arms (LeRobot compatible), with a terminal UI, an optional AI helper (local or API), a CLI and a local web dashboard."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -15,13 +15,18 @@ classifiers = [
     "Intended Audience :: Science/Research",
 ]
 # The core (wizard, checks, store, dashboard, mock bus) is pure standard library.
-dependencies = []
+dependencies = [
+    "textual>=8.2.8",
+]
 
 [project.optional-dependencies]
 # Needed only to talk to real Feetech STS3215 motors.
 hardware = [
     "feetech-servo-sdk>=1.0.0",
     "pyserial>=3.5",
+]
+ai = [
+    "anthropic>=2.3.0",
 ]
 
 [project.scripts]

@@ -350,6 +350,46 @@ def cmd_where(args, env: Env) -> int:
     return 0
 
 
+def cmd_tui(args, env: Env) -> int:
+    from .tui import run
+
+    return run(env, args.ai)
+
+
+def cmd_ai(args, env: Env) -> int:
+    from . import ai as AI
+
+    root = env.store.root
+    try:
+        if args.action == "use":
+            if not args.arg:
+                print("usage: so101-cal ai use ollama[:model] | claude[:model] | openai:<model>")
+                return 2
+            spec = args.arg[0]
+            AI.parse_spec(spec)
+            AI.save_spec(root, spec)
+            print(f"AI helper: {spec} (saved in {root / 'config.json'})")
+            return 0
+        if args.action == "off":
+            AI.save_spec(root, None)
+            print("AI helper off.")
+            return 0
+        spec = AI.load_spec(root, args.ai)
+        if args.action == "status":
+            print(f"AI helper: {spec or 'off'}")
+            if not spec:
+                print("Turn it on: so101-cal ai use ollama  (local)  or  so101-cal ai use claude  (API)")
+            return 0
+        if not spec:
+            print("AI helper is off: so101-cal ai use ollama | claude | openai:<model>", file=sys.stderr)
+            return 2
+        print(AI.Assistant(spec).ask(" ".join(args.arg), AI.describe(None, env.store.arms())))
+        return 0
+    except AI.AIError as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 2
+
+
 def cmd_dashboard(args, env: Env) -> int:
     from .dashboard.server import serve
 
@@ -365,7 +405,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mock", action="store_true", help="use a simulated leader + follower instead of hardware")
     p.add_argument("--mock-faults", help="inject faults into the mock, e.g. missing:4,voltage:5,reversed:elbow_flex")
     p.add_argument("--mock-speed", type=float, default=1.0, help="speed-up of the simulated hand")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p.add_argument("--ai", metavar="SPEC", help="AI helper: ollama[:model], claude[:model], openai:<model> or off "
+                   "(default: `so101-cal ai use ...` or $SO101CAL_AI)")
+    sub = p.add_subparsers(dest="cmd", metavar="command")
+    p.set_defaults(func=cmd_tui)
 
     def interactive(sp):
         sp.add_argument("-y", "--yes", action="store_true", help="no prompts: continue on warnings, abort on failures")
@@ -459,6 +502,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--id")
     sp.add_argument("--legacy-export", action="store_true")
     sp.set_defaults(func=cmd_where)
+
+    sub.add_parser("tui", help="the terminal UI (also: so101-cal with no command)").set_defaults(func=cmd_tui)
+
+    sp = sub.add_parser("ai", help="set up or use the optional AI helper")
+    sp.add_argument("action", nargs="?", choices=["status", "use", "off", "ask"], default="status")
+    sp.add_argument("arg", nargs="*", help="use: ollama[:model] | claude[:model] | openai:<model>; ask: a question")
+    sp.set_defaults(func=cmd_ai)
 
     sp = sub.add_parser("dashboard", help="open the local web dashboard")
     sp.add_argument("--host", default="127.0.0.1")

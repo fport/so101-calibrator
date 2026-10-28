@@ -64,6 +64,10 @@ class Step:
     def instructions(self, s: Session) -> str:
         return ""
 
+    def hint(self, s: Session) -> str:
+        """One short line telling the user what to do now (the TUI shows this; details on demand)."""
+        return self.title
+
     def run(self, s: Session) -> list[K.Check]:  # instant steps
         raise NotImplementedError
 
@@ -107,6 +111,15 @@ class PortStep(Step):
     def run(self, s):
         t = s.targets[self.role]
         return K.check_port_exists(t.port, s.ctx.list_ports())
+
+    def hint(self, s):
+        t = s.targets[self.role]
+        if t.port:
+            return f"Using {t.port}"
+        return {"unplug": f"Unplug the {self.role}'s USB cable now",
+                "replug": "Plug it back in",
+                "ambiguous": "Several ports vanished: plug in only this arm"}.get(
+            self.phase, f"Start, then unplug the {self.role}'s USB cable")
 
     def begin(self, s):
         self.before = s.ctx.list_ports()
@@ -156,6 +169,9 @@ class MotorsStep(Step):
         return (f"Connects to {s.targets[self.role].port} at 1 Mbps and looks for motor ids 1-6 "
                 f"({', '.join(JOINTS)}). The {self.role}'s power supply must be on.")
 
+    def hint(self, s):
+        return f"Power on, then scan motors 1-6 on {s.targets[self.role].port}"
+
     def run(self, s):
         t = s.targets[self.role]
         if t.port not in s.ctx.list_ports():
@@ -188,6 +204,10 @@ class PowerStep(Step):
         prof = s.profile(self.role)
         return f"Reads every motor's voltage and temperature. Expected {prof.voltage_min}-{prof.voltage_max} V."
 
+    def hint(self, s):
+        prof = s.profile(self.role)
+        return f"Check supply: {prof.voltage_min:g}-{prof.voltage_max:g} V"
+
     def run(self, s):
         arm = self.arm(s)
         return K.check_power(arm.voltages(), arm.temperatures(), s.profile(self.role))
@@ -200,6 +220,9 @@ class HomingStep(Step):
         return ("Torque is off: move the arm by hand so EVERY joint is in the middle of its range (upper arm "
                 "and forearm forming a right angle, wrist straight, gripper half open). Hold it still and "
                 "press Start.")
+
+    def hint(self, s):
+        return "Put every joint in the middle of its range, hold still"
 
     def on_ready(self, s):
         self.arm(s).prepare_for_calibration()
@@ -220,6 +243,11 @@ class RangesStep(Step):
     def instructions(self, s):
         return ("Press Start, then move each joint EXCEPT wrist_roll slowly all the way to both mechanical "
                 "stops, one at a time. Watch the bars fill. Return the arm to the middle and press Stop.")
+
+    def hint(self, s):
+        if s.state and s.state.status == "running":
+            return "Move each joint to both stops, back to the middle, then Stop"
+        return "Start, then move each joint (not wrist_roll) to both stops"
 
     def begin(self, s):
         pos = self.arm(s).positions()
@@ -255,6 +283,12 @@ class DirectionStep(Step):
     def instructions(self, s):
         return ("Press Start. For each joint shown, move it a little in the direction described, then back. "
                 "The tool records which way the encoder counts so leader and follower can be compared.")
+
+    def hint(self, s):
+        j = getattr(self, "current", None) if hasattr(self, "signs") else None
+        if j and s.state and s.state.status == "running":
+            return f"{j}: {P.DIRECTION_PROMPTS.get(j, 'move it a little')}"
+        return "Start, then move each joint a little as shown"
 
     def begin(self, s):
         self.signs: dict[str, int] = {}
@@ -313,6 +347,9 @@ class SaveStep(Step):
         return ("Writes the ranges to the motors, reads them back, stores a new version in the calibration "
                 f"history{tail}.")
 
+    def hint(self, s):
+        return "Write to the motors and save a new version"
+
     def run(self, s):
         t = s.targets[self.role]
         cal = {j: C.MotorCalibration(id=MOTOR_IDS[j], drive_mode=0, homing_offset=s.data["offsets"][j],
@@ -349,6 +386,9 @@ class MatchStep(Step):
     def instructions(self, s):
         return "Reads offsets and limits from the motors and compares them with the active stored version."
 
+    def hint(self, s):
+        return "Compare the motors with the stored calibration"
+
     def run(self, s):
         t = s.targets[self.role]
         rec = s.ctx.store.active(t.arm_id)
@@ -366,6 +406,9 @@ class PoseStep(Step):
     def instructions(self, s):
         return ("Move the arm by hand into the same middle pose used for calibration and press Start. Each "
                 "joint should read close to 2047 again.")
+
+    def hint(self, s):
+        return "Put the arm in the middle pose again, hold still"
 
     def on_ready(self, s):
         self.arm(s).set_torque(False)
@@ -389,6 +432,11 @@ class TeleopStep(Step):
         return (f"Hold the leader in the SAME pose as the follower, then press Start. The follower's torque "
                 f"turns on and it mirrors the leader for {s.ctx.teleop_seconds:.0f} s (or until Stop). Move "
                 "slowly through all joints. When it stops the follower goes limp: keep a hand near it.")
+
+    def hint(self, s):
+        if s.state and s.state.status == "running":
+            return "Move the leader slowly; the follower mirrors it"
+        return "Put both arms in the same pose, then Start"
 
     def _norm(self, s, role):
         cal = s.data.get(f"cal:{role}")
@@ -674,7 +722,7 @@ class Session:
             if st:
                 current = {
                     "id": st.id, "label": st.label, "live": st.live, "status": status,
-                    "instructions": st.instructions(self), "progress": st.progress(self),
+                    "instructions": st.instructions(self), "hint": st.hint(self), "progress": st.progress(self),
                     "can": {
                         "start": status == "ready",
                         "stop": status == "running",

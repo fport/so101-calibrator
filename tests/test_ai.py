@@ -1,0 +1,155 @@
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
+
+import pytest
+
+from so101_calibrator import ai as AI
+from so101_calibrator.cli import main
+from so101_calibrator.mock import MockRig
+
+from .conftest import calibrate
+
+
+@pytest.fixture
+def fake_server(monkeypatch):
+    """A tiny Ollama + OpenAI-compatible server; records request bodies."""
+    seen: list[dict] = []
+    reject_think = {"on": False}
+
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _send(self, code, payload: bytes, ctype="application/json"):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            self._send(200, json.dumps({"models": [{"name": "tiny:1b"}]}).encode())
+
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            seen.append(body)
+            if self.path == "/api/chat":
+                if reject_think["on"] and "think" in body:
+                    self._send(400, b'{"error":"\\"tiny:1b\\" does not support thinking"}')
+                    return
+                lines = [{"message": {"content": w}, "done": False} for w in ("Plug ", "in ", "12 V.")]
+                lines.append({"message": {"content": ""}, "done": True})
+                self._send(200, b"".join(json.dumps(x).encode() + b"\n" for x in lines), "application/x-ndjson")
+            else:
+                self._send(200, json.dumps({"choices": [{"message": {"content": "OK from openai"}}]}).encode())
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    monkeypatch.setenv("OLLAMA_HOST", url)
+    monkeypatch.setenv("SO101CAL_AI_URL", url + "/v1")
+    yield SimpleNamespace(url=url, seen=seen, reject_think=reject_think)
+    srv.shutdown()
+
+
+def test_parse_spec():
+    assert AI.parse_spec("ollama") == ("ollama", "")
+    assert AI.parse_spec("ollama:qwen3.5:9b") == ("ollama", "qwen3.5:9b")
+    assert AI.parse_spec("anthropic") == ("claude", "")
+    assert AI.Assistant("claude").model == AI.CLAUDE_MODEL
+    with pytest.raises(AI.AIError):
+        AI.parse_spec("gpt")
+    with pytest.raises(AI.AIError):
+        AI.parse_spec("openai")
+
+
+def test_spec_precedence(tmp_path, monkeypatch):
+    monkeypatch.delenv("SO101CAL_AI", raising=False)
+    assert AI.load_spec(tmp_path) is None
+    AI.save_spec(tmp_path, "ollama")
+    assert AI.load_spec(tmp_path) == "ollama"
+    monkeypatch.setenv("SO101CAL_AI", "claude")
+    assert AI.load_spec(tmp_path) == "claude"
+    assert AI.load_spec(tmp_path, "openai:x") == "openai:x"
+    assert AI.load_spec(tmp_path, "off") is None
+
+
+def test_describe_session_snapshot(store):
+    session = calibrate(store, MockRig.create("voltage:5.0"), "follower", port_known=True)
+    state = AI.describe(session.snapshot(), [])
+    power = next(s for s in state["steps"] if s["step"] == "Check supply voltage")
+    assert power["status"] == "fail" and power["problems"][0]["fix"]
+    assert "follower" in state["joints"]
+    json.dumps(state)  # must be serializable as the prompt
+
+
+def test_ollama_streams_and_picks_first_model(fake_server):
+    a = AI.Assistant("ollama")
+    partial: list[str] = []
+    assert a.ask("", {"flow": "calibrate"}, on_text=partial.append) == "Plug in 12 V."
+    assert a.model == "tiny:1b" and partial[0] == "Plug " and partial[-1] == "Plug in 12 V."
+    body = fake_server.seen[-1]
+    assert body["think"] is False and body["messages"][0]["role"] == "system"
+    a.ask("again?", {})
+    assert [m["role"] for m in fake_server.seen[-1]["messages"]] == ["system", "user", "assistant", "user"]
+
+
+def test_ollama_retries_without_think(fake_server):
+    fake_server.reject_think["on"] = True
+    assert AI.Assistant("ollama:tiny:1b").ask("", {}) == "Plug in 12 V."
+    assert "think" not in fake_server.seen[-1]
+
+
+def test_openai_compatible(fake_server):
+    assert AI.Assistant("openai:local-model").ask("hi", {}) == "OK from openai"
+    assert fake_server.seen[-1]["model"] == "local-model"
+
+
+def test_unreachable_server(monkeypatch):
+    monkeypatch.setenv("OLLAMA_HOST", "http://127.0.0.1:9")
+    with pytest.raises(AI.AIError, match="ollama serve"):
+        AI.Assistant("ollama:x").ask("", {})
+
+
+def test_claude_request_shape(monkeypatch):
+    anthropic = pytest.importorskip("anthropic")
+    calls = {}
+
+    class FakeStream:
+        text_stream = iter(["Check ", "the cable."])
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get_final_message(self):
+            return SimpleNamespace(stop_reason="end_turn",
+                                   content=[SimpleNamespace(type="text", text="Check the cable.")])
+
+    class FakeClient:
+        def __init__(self, **kw):
+            self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self.stream))
+
+        def stream(self, **kw):
+            calls.update(kw)
+            return FakeStream()
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
+    assert AI.Assistant("claude").ask("", {}) == "Check the cable."
+    assert calls["model"] == AI.CLAUDE_MODEL and calls["fallbacks"] == "default"
+    assert calls["output_config"] == {"effort": "low"} and "server-side-fallback-2026-07-01" in calls["betas"]
+
+
+def test_cli_ai_commands(capsys, fake_server, monkeypatch):
+    monkeypatch.delenv("SO101CAL_AI", raising=False)
+    assert main(["ai"]) == 0 and "off" in capsys.readouterr().out
+    assert main(["ai", "use", "ollama:tiny:1b"]) == 0
+    assert main(["ai"]) == 0 and "ollama:tiny:1b" in capsys.readouterr().out
+    assert main(["ai", "ask", "what", "next?"]) == 0
+    assert "Plug in 12 V." in capsys.readouterr().out
+    assert main(["ai", "use", "nope"]) == 2
+    assert main(["ai", "off"]) == 0
+    assert main(["ai", "ask", "x"]) == 2

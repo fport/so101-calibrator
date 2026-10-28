@@ -1,10 +1,10 @@
 # so101-calibrator
 
 Step-by-step, **checked** and **versioned** calibration for the SO-101 leader and follower arms,
-compatible with [LeRobot](https://github.com/huggingface/lerobot). One core, two front ends: a CLI
-wizard and a local web dashboard.
+compatible with [LeRobot](https://github.com/huggingface/lerobot). Type `so101-cal` and a terminal UI
+walks you through it: one line telling you what to do, live joint bars, and **Enter** to go on.
 
-![Dashboard recording the ranges of motion of a (simulated) follower](docs/dashboard.png)
+![The terminal UI recording the ranges of motion of a (simulated) follower](docs/tui-ranges.png)
 
 `lerobot-calibrate` does the math right but asks you to do everything blind: press ENTER, move the
 arm, hope. When something is off (a motor on the wrong id, the follower running on USB power, a
@@ -34,11 +34,17 @@ diff, roll back and export.
 - **History**: every calibration stored with timestamp, role, USB serial, port, note and the check
   results. List, show, diff two versions, roll back, export to the LeRobot cache or any `calibration_dir`,
   import existing LeRobot files.
-- **Dashboard**: the same wizard in the browser, with live joint bars (calibrated range, range recorded
-  so far, current position) and the history with diff and one-click rollback.
+- **Terminal UI** (`so101-cal`): one short instruction per step, live joint bars (stored range, range
+  recorded now, current position), single-key actions, history with diff and rollback. `?` shows the
+  long explanation of a step.
+- **Optional AI helper** (`a` in the TUI): explains a failed check and answers questions about the
+  current state, in your language. Local (Ollama, LM Studio, llama.cpp) or Claude via the API.
+- Every action is also a plain **CLI command** for scripts, and the same wizard runs in a local **web
+  dashboard** (`so101-cal dashboard`).
 - **Mock hardware**: a simulated leader + follower (register-level STS3215 emulation and a "hand" that
   moves the arm) with fault injection. Every test runs on it; you can try the whole tool without an arm.
-- Pure standard library core. The only hardware dependencies are Feetech's `scservo_sdk` and `pyserial`.
+- Small dependency footprint: Textual for the terminal UI; Feetech's `scservo_sdk` and `pyserial` for
+  the hardware; the `anthropic` SDK only if you use Claude.
 
 ## Install
 
@@ -47,17 +53,19 @@ Requires Python ≥ 3.10. With [uv](https://docs.astral.sh/uv/):
 ```bash
 git clone https://github.com/fport/so101-calibrator && cd so101-calibrator
 uv sync --extra hardware          # drop --extra hardware to only try the mock
-uv run so101-cal --help
+uv run so101-cal                  # opens the terminal UI
 ```
 
-or as a global tool: `uv tool install "so101-calibrator[hardware] @ git+https://github.com/fport/so101-calibrator"`.
+or as a global tool: `uv tool install "so101-calibrator[hardware] @ git+https://github.com/fport/so101-calibrator"`
+(add `,ai` inside the brackets for the Claude helper).
 
 ## Try it without hardware
 
 ```bash
-uv run so101-cal --mock dashboard                     # opens http://127.0.0.1:8101
-uv run so101-cal --mock calibrate follower            # the CLI wizard against the simulated arm
-uv run so101-cal --mock --mock-faults reversed:elbow_flex,voltage:5 calibrate follower
+uv run so101-cal --mock                               # the terminal UI on a simulated leader + follower
+uv run so101-cal --mock --mock-faults voltage:5       # ...with a fault to see a failing check
+uv run so101-cal --mock calibrate follower            # the plain CLI wizard
+uv run so101-cal --mock dashboard                     # the web dashboard, http://127.0.0.1:8101
 ```
 
 Faults: `missing:<id>`, `voltage:<V>`, `reversed:<joint>`, `stuck:<joint>`, `hot:<joint>`; prefix with
@@ -65,8 +73,12 @@ Faults: `missing:<id>`, `voltage:<V>`, `reversed:<joint>`, `stuck:<joint>`, `hot
 
 ## Calibrating a real arm
 
-Do the follower and the leader separately. The `--id` is the LeRobot id you will later pass as
-`--robot.id` / `--teleop.id` (default: `follower` / `leader`).
+Run `uv run so101-cal`, pick **Calibrate follower**, then **Calibrate leader**, then **Teleop test**.
+In every step **Enter** does the obvious thing (start, stop, continue, retry); the keys for everything
+else are at the bottom of the screen. The arms are stored as `follower` / `leader`, the LeRobot ids
+you later pass as `--robot.id` / `--teleop.id`.
+
+Without the UI (scripts, other ids, a note):
 
 ```bash
 uv run so101-cal calibrate follower --id follower --note "first calibration"
@@ -74,7 +86,7 @@ uv run so101-cal calibrate leader --id leader
 uv run so101-cal teleop-test                          # short leader -> follower check
 ```
 
-The wizard walks you through:
+The steps:
 
 1. **Port**: with only this arm's board plugged in, press ENTER, unplug its USB cable, plug it back
    in. The port is remembered for next time (pass `--port` to skip this).
@@ -88,8 +100,31 @@ The wizard walks you through:
    on by itself. Calibrate the second arm the same way and the two are compared.
 7. **Save**: written to the motors, read back, stored and exported to where LeRobot reads it.
 
-On a warning you can continue or retry; on a failure the fix is printed and you retry. A calibration
+On a warning you can continue or retry; on a failure the fix is shown and you retry. A calibration
 pushed past a failure (`f`) is stored for reference but **not** activated or exported.
+
+## AI helper (optional)
+
+![A local model explaining a failed supply check](docs/tui-ai.png)
+
+Press `a` in the TUI and ask a question, or press Enter on an empty line to have the current problem
+explained. The model sees what the screen shows (steps, check results and fixes, joint readings) and
+nothing else; it answers briefly, in the language you write in. It is off until you pick a model:
+
+```bash
+so101-cal ai use ollama                 # local: first model `ollama list` shows (or ollama:qwen2.5 ...)
+so101-cal ai use openai:my-model        # any OpenAI-compatible server, URL in $SO101CAL_AI_URL
+                                        #   e.g. LM Studio: http://localhost:1234/v1
+so101-cal ai use claude                 # Anthropic API: uv sync --extra ai, ANTHROPIC_API_KEY
+so101-cal ai ask "why does my gripper only open halfway?"
+so101-cal ai off
+```
+
+You can also type the model into the TUI's AI box the first time, or pass `--ai SPEC` / set
+`$SO101CAL_AI`. Ollama runs thinking models (qwen3, deepseek-r1) with thinking off so answers come back
+in seconds. The Claude helper uses `claude-opus-5-5` at low effort with Anthropic's server-side refusal
+fallback; pick another model with `claude:<model>`. The AI only explains: it never moves the arm or
+changes a calibration.
 
 LeRobot then picks the files up with no extra flags:
 
@@ -120,6 +155,9 @@ so101-cal verify follower             # still valid? (EEPROM + middle pose)
 so101-cal where follower --id my_arm  # path LeRobot reads for this id
 ```
 
+The TUI's **History** screen does the same with keys: Enter makes a version active (press twice),
+`d` diffs it against the active one, `e` exports it.
+
 The store is plain JSON, by default in `~/.so101-calibrator` (`--store DIR` or `$SO101CAL_HOME` to
 change it, e.g. to a folder in your project's git repo):
 
@@ -130,6 +168,7 @@ change it, e.g. to a folder in your project's git repo):
     v0001.json      metadata, check results, joint directions, LeRobot calibration
     v0002.json
   leader/ …
+  config.json       AI helper choice
 ```
 
 Export targets `$HF_LEROBOT_CALIBRATION`, else `$HF_LEROBOT_HOME/calibration`, else
@@ -143,7 +182,8 @@ Export targets `$HF_LEROBOT_CALIBRATION`, else `$HF_LEROBOT_HOME/calibration`, e
 The calibration itself is identical to `lerobot-calibrate` for the SO-101: homing offset =
 position − 2047 in the middle pose, recorded min/max for every joint, `wrist_roll` fixed to 0..4095,
 `drive_mode` 0, and the same JSON format. The motor access is a small driver on Feetech's
-`scservo_sdk` (the SDK LeRobot uses), so this tool does not need LeRobot or PyTorch installed.
+`scservo_sdk` (the SDK LeRobot uses), so this tool does not need LeRobot or PyTorch installed. The
+terminal UI uses [Textual](https://github.com/Textualize/textual).
 
 Built against the LeRobot 0.6.1 file layout. SO-100 arms use the same motors and will probably work,
 but are untested.

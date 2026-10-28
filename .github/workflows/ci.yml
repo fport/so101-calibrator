@@ -23,7 +23,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --extra hardware
+      - run: uv sync --extra hardware --extra ai
       - run: uv run ruff check .
       - run: uv run pytest -q
       - name: Mock end-to-end (CLI)
