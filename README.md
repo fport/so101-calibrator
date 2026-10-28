@@ -1,229 +1,166 @@
-# so101-calibrator
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/so101/direction_elbow_flex.gif" width="240" alt="Pixel-art SO-101 with the elbow highlighted">
+</p>
 
-Step-by-step, **checked** and **versioned** calibration for the SO-101 leader and follower arms,
-compatible with [LeRobot](https://github.com/huggingface/lerobot). Type `so101-cal`: one screen per step,
-a pixel-art SO-101 with the joint to move in orange, one sentence, and **Enter** to go on. In English or
-Turkish (`l`).
+<h1 align="center">so101-calibrator</h1>
 
-![The terminal UI asking for the elbow to be unfolded, with the joint highlighted on the arm](https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-direction.png)
+<p align="center"><b>Calibrate your SO-101 arms step by step, with a check at every step.</b><br>
+For <a href="https://github.com/huggingface/lerobot">LeRobot</a>. In the terminal. English and Turkish.</p>
 
-`lerobot-calibrate` does the math right but asks you to do everything blind: press ENTER, move the
-arm, hope. When something is off (a motor on the wrong id, the follower running on USB power, a
-joint swept only halfway, a motor mounted backwards) you find out later, as a jerky teleop session or a
-policy that never learns. This tool runs the same calibration as a sequence of steps, checks every
-step, tells you what to do when a check fails, and keeps every calibration as a version you can
-diff, roll back and export.
+<p align="center">
+  <a href="https://pypi.org/project/so101-calibrator/"><img src="https://img.shields.io/pypi/v/so101-calibrator?color=ff7a1a&labelColor=1c1c1c&label=pypi" alt="PyPI"></a>
+  <a href="https://pypi.org/project/so101-calibrator/"><img src="https://img.shields.io/badge/python-3.10%2B-ededed?labelColor=1c1c1c" alt="Python 3.10+"></a>
+  <a href="https://github.com/fport/so101-calibrator/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/fport/so101-calibrator/ci.yml?branch=main&labelColor=1c1c1c&label=tests" alt="Tests"></a>
+  <a href="https://github.com/huggingface/lerobot"><img src="https://img.shields.io/badge/LeRobot-compatible-ff7a1a?labelColor=1c1c1c" alt="LeRobot compatible"></a>
+  <a href="https://github.com/fport/so101-calibrator/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-ededed?labelColor=1c1c1c" alt="MIT license"></a>
+</p>
 
-## Install
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-direction.png" width="820" alt="One step of the calibration: move the elbow">
+</p>
 
-Requires Python ≥ 3.10.
+## Start
 
 ```bash
-pip install so101-calibrator            # or: uv tool install so101-calibrator / pipx install so101-calibrator
-so101-cal --mock                        # try it on a simulated arm first
-so101-cal                               # then with your arms plugged in
+uv tool install so101-calibrator     # or: pipx install so101-calibrator / pip install so101-calibrator
+so101-cal --mock                     # try it on a simulated arm
+so101-cal                            # then with your arms plugged in
 ```
 
-Everything needed for real STS3215 motors is included. `pip install "so101-calibrator[ai]"` adds the
-optional assistant ([Strands Agents](https://strandsagents.com) for local models, the Anthropic SDK for
-Claude).
+Pick **Follower**, then **Leader**, then **Test both arms**. Every screen shows one thing to do; the joint
+to move is orange; **Enter** goes on. LeRobot then finds the calibration with no extra flags.
 
-## What it does
+## Why
 
-- **A wizard with a pass / warn / fail check on every step**, and a concrete fix for every failure:
+`lerobot-calibrate` does the math right but leaves you blind: a motor on the wrong id, a follower on USB
+power, a joint swept halfway or a motor mounted backwards only shows up later as a jerky robot. Here every
+step is checked, every failure says what to fix, and every calibration is kept as a version.
 
-  | Step | What is checked |
-  | --- | --- |
-  | Find the USB port | Detected by unplugging the cable; the board's USB serial is remembered, so swapped `/dev/ttyACM*` paths do not matter |
-  | Motors | Ids 1–6 answer at 1 Mbps; missing ids name the cable to check; unconfigured motors found at other baud rates |
-  | Supply | Follower ~12 V (or 7.4 V preset), leader ~5 V and **never 12 V**; voltage drop along the chain; motor temperature |
-  | Middle pose | Homing offsets written and read back as 2047; offset near the ±2047 limit; drift vs. the previous calibration |
-  | Ranges | Range too narrow, middle pose outside the range or off-centre, encoder wrap (0/4095), span change vs. last time |
-  | Directions | Which way each encoder counts, compared with the paired arm and with the previous calibration (catches a reversed motor or flipped horn) |
-  | Save | Valid LeRobot format, written to the motors and read back, stored as a new version, exported |
+| | |
+| --- | --- |
+| ✅ **Checked steps** | USB port, motors 1–6, supply voltage, middle pose, ranges, joint directions, save |
+| 🕘 **Versions** | history, diff, one-key rollback, export to LeRobot |
+| 🦾 **Teleop test** | leader → follower, refuses to start if the poses differ |
+| 💬 **Assistant** | optional, local ([Strands](https://strandsagents.com) + Ollama) or Claude |
+| 🧪 **Mock arm** | try everything without hardware |
 
-- **Shows what to do.** Each step plays a short pixel-art clip of the SO-101, made from the official
-  MuJoCo model, with only the joint to move drawn in orange. It works in any terminal with true color,
-  and picks the largest of four sizes that fits the window.
-- **English and Turkish**: `l` switches the language and remembers it (default: your locale, or
-  `--lang en|tr`). Check messages are English for now.
-- **Verify** an existing calibration: the motor EEPROM still matches the active version, and the arm
-  put back in the middle pose reads ~2047 on every joint.
-- **Teleop test**: refuses to start unless leader and follower are in the same pose (otherwise the
-  follower would jump), then mirrors leader → follower with a rate limit and measures the tracking error.
-- **History**: every calibration is stored with its timestamp, role, USB serial, port, note and check
-  results. You can list, show, diff and roll back versions, export to the LeRobot cache or any
-  `calibration_dir`, and import existing LeRobot files.
-- **Optional assistant**: explains a failed check or answers a question about the current state or the
-  calibration history, in your language. Local models (Ollama, LM Studio, llama.cpp) run as a
-  [Strands](https://strandsagents.com) agent with read-only tools; Claude runs on the Anthropic SDK.
-- **Mock hardware**: a simulated leader + follower (register-level STS3215 emulation and a "hand" that
-  moves the arm) with fault injection. Every test runs on it, and you can try the whole tool without an arm.
-- The same wizard also runs as **plain CLI commands** for scripts, and as a local **web dashboard**
-  (`so101-cal dashboard`).
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-home.png" width="400" alt="Home screen">
+  &nbsp;
+  <img src="https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-ai.png" width="400" alt="The assistant explaining a failed check">
+</p>
 
-## Calibrating your arms
+> [!WARNING]
+> The teleop test turns follower torque on. Keep the workspace clear and a hand near the follower: it
+> goes limp again when the test ends (and on Ctrl+C, a closed terminal or a pulled cable).
 
-![Home screen](https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-home.png)
+## More
 
-Run `so101-cal`, then pick **Calibrate follower**, then **Calibrate leader**, then **Teleop test**.
-In every step **Enter** does the obvious thing: start, stop, continue or retry. The keys for everything
-else are shown at the bottom of the screen. The arms are stored as `follower` / `leader`, which are the
-LeRobot ids you later pass as `--robot.id` / `--teleop.id`.
+<details>
+<summary><b>Keys</b></summary>
 
-1. **Port**: with only this arm's board plugged in, press Enter, unplug its USB cable, then plug it
-   back in.
-2. **Motors**, then **Supply**: the follower needs its 12 V adapter plugged in (use `--supply 7.4v` for
-   kits with 7.4 V motors). The leader runs on 5 V.
-3. **Middle pose**: torque is off. Put every joint in the middle of its range: upper arm and forearm
-   at a right angle, wrist straight, gripper half open.
-4. **Ranges**: move each joint except `wrist_roll` slowly to both mechanical stops, then back to the
-   middle. The bars fill as you go.
-5. **Directions**: move the joint that is shown a little, the way the animation shows. The step moves
-   on by itself.
-6. **Save**: the calibration is written to the motors, read back, stored and exported to where LeRobot
-   reads it.
+| Key | |
+| --- | --- |
+| `⏎` | start · done · continue · retry |
+| `r` / `f` | retry / accept a failed step anyway |
+| `j` | live joint bars |
+| `?` | the long explanation of a step |
+| `a` | ask the assistant |
+| `l` | English ↔ Türkçe |
+| `h` | history (`⏎` make active, `d` compare, `e` export) |
+| `esc` | cancel (press twice) |
 
-On a warning you can continue or retry; on a failure you retry once you have applied the fix. A
-calibration pushed past a failure (`f`) is stored for reference but **not** activated or exported. If
-you abort after the middle-pose step, the tool tells you how to put the active calibration back into
-the motors.
+</details>
 
-LeRobot then picks the files up with no extra flags:
+<details>
+<summary><b>Commands</b> (scripts, other ids, rollback)</summary>
 
 ```bash
-lerobot-teleoperate --robot.type=so101_follower --robot.port=/dev/tty.usbmodem... --robot.id=follower \
-  --teleop.type=so101_leader --teleop.port=/dev/tty.usbmodem... --teleop.id=leader
-```
-
-If LeRobot asks *"Press ENTER to use provided calibration file … or type 'c'"*, press ENTER: the file
-already matches the motors.
-
-> **Safety:** the teleop test enables follower torque. Start with both arms in the same pose (the test
-> refuses otherwise), keep the workspace clear, and keep a hand near the follower when the test ends:
-> it goes limp again. Torque is switched off on every exit path, including Ctrl+C, closing the
-> terminal, and a USB cable pulled mid-test.
-
-Without the UI (scripts, other ids, a note):
-
-```bash
-so101-cal calibrate follower --id follower --note "after replacing the elbow motor"
+so101-cal calibrate follower --id follower --note "new elbow motor"
 so101-cal calibrate leader --id leader
 so101-cal teleop-test
-```
+so101-cal verify follower             # EEPROM still matches, middle pose reads ~2047
 
-## Assistant (optional)
-
-![A local model explaining a failed supply check](https://raw.githubusercontent.com/fport/so101-calibrator/main/docs/tui-ai.png)
-
-Press `a` and ask a question, or press Enter on an empty line to have the current problem explained.
-The model sees what the screen shows (steps, check results and fixes, joint readings). Local and
-OpenAI-compatible models run as a [Strands](https://strandsagents.com) agent that can also look up the
-calibration history and compare two versions ("what changed since last week?"); both tools are
-read-only. The assistant answers briefly, in your language, and only explains: it has no tool that moves
-the arm or changes a calibration. It is off until you pick a model (`pip install "so101-calibrator[ai]"`):
-
-```bash
-so101-cal ai use ollama                 # local: the first model `ollama list` shows (or ollama:qwen2.5 ...)
-so101-cal ai use openai:my-model        # any OpenAI-compatible server; URL in $SO101CAL_AI_URL,
-                                        #   e.g. LM Studio: http://localhost:1234/v1
-so101-cal ai use claude                 # Anthropic API: pip install "so101-calibrator[ai]", ANTHROPIC_API_KEY
-so101-cal ai ask "why does my gripper only open halfway?"
-so101-cal ai off
-```
-
-You can also type the model into the assistant box the first time, pass `--ai SPEC`, or set
-`$SO101CAL_AI`. Ollama runs thinking models (qwen3, deepseek-r1) with thinking off, so answers come back
-in seconds; models without tool support answer from the screen state alone.
-The Claude helper uses `claude-opus-5-5` at low effort, with Anthropic's server-side refusal fallback;
-pick another model with `claude:<model>`.
-
-## Try it without hardware
-
-```bash
-so101-cal --mock                                     # the terminal UI on a simulated leader + follower
-so101-cal --mock --mock-faults voltage:5             # ...with a fault, to see a failing check
-so101-cal --mock calibrate follower                  # the plain CLI wizard
-so101-cal --mock dashboard                           # the web dashboard, http://127.0.0.1:8101
-```
-
-Faults: `missing:<id>`, `voltage:<V>`, `reversed:<joint>`, `stuck:<joint>`, `hot:<joint>`. Prefix one with
-`leader.` to apply it to the leader. Mock calibrations are exported into the mock store, never into your
-real LeRobot cache.
-
-## History, diff, rollback
-
-```bash
 so101-cal history                     # all arms and versions
-so101-cal show follower               # active version (or: show follower 3, --json)
-so101-cal diff follower 2 3           # per joint/field deltas in ticks
-so101-cal activate follower 2         # roll back: make v2 active and export it
-so101-cal write follower              # also push the active version into the motors' EEPROM
-so101-cal export follower --calibration-dir hardware/calibration   # for --robot.calibration_dir users
-so101-cal import ~/.cache/huggingface/lerobot/calibration/robots/so_follower/follower.json \
-  --role follower --id follower --note "made with lerobot-calibrate"
-so101-cal verify follower             # still valid? (EEPROM + middle pose)
-so101-cal where follower --id my_arm  # path LeRobot reads for this id
+so101-cal diff follower 2 3           # what changed, in encoder ticks
+so101-cal activate follower 2         # roll back and export
+so101-cal write follower              # push the active version into the motors
+so101-cal export follower --calibration-dir hardware/calibration
+so101-cal import path/to/follower.json --role follower --id follower
 ```
 
-The TUI's **History** screen does the same with keys: Enter makes a version active (press it twice),
-`d` diffs a version against the active one, and `e` exports it. Before `write` touches the EEPROM, it
-checks that the arm on the port really is the one you named (motor ids and supply voltage). This
-prevents writing a follower calibration into the leader.
+Then, as usual:
 
-The store is plain JSON, written atomically, by default in `~/.so101-calibrator`. Use `--store DIR` or
-`$SO101CAL_HOME` to change it, for example to a folder in your project's git repo:
-
-```
-~/.so101-calibrator/
-  follower/
-    arm.json        role, USB serial, last port, active version
-    v0001.json      metadata, check results, joint directions, LeRobot calibration
-    v0002.json
-  leader/ …
-  config.json       AI helper choice
+```bash
+lerobot-teleoperate --robot.type=so101_follower --robot.port=... --robot.id=follower \
+  --teleop.type=so101_leader --teleop.port=... --teleop.id=leader
 ```
 
-Exports go to `$HF_LEROBOT_CALIBRATION`, else `$HF_LEROBOT_HOME/calibration`, else
-`~/.cache/huggingface/lerobot/calibration`. The files are `robots/so_follower/<id>.json` and
-`teleoperators/so_leader/<id>.json`, as LeRobot ≥ 0.4 expects; `--legacy-export` uses the older
-`so101_follower` / `so101_leader` directories. A different file already at the target is kept as
-`<name>.bak-<timestamp>`.
+</details>
 
-## How it relates to LeRobot
+<details>
+<summary><b>Assistant</b></summary>
 
-The calibration itself is identical to `lerobot-calibrate` for the SO-101:
-- homing offset = position − 2047 in the middle pose;
-- min/max recorded for every joint;
-- `wrist_roll` fixed to 0..4095;
-- `drive_mode` 0;
-- the same JSON format.
+```bash
+uv tool install "so101-calibrator[ai]"
+so101-cal ai use ollama               # local model (or ollama:qwen2.5, ...)
+so101-cal ai use openai:my-model      # LM Studio / llama.cpp / vLLM: URL in $SO101CAL_AI_URL
+so101-cal ai use claude               # ANTHROPIC_API_KEY
+```
 
-Motor access goes through Feetech's `scservo_sdk`, the SDK LeRobot uses, so this tool does not need
-LeRobot or PyTorch. Built against the LeRobot 0.6.1 file layout. SO-100 arms use the same motors and
-will probably work, but are untested.
+Press `a` in the app and ask, or press Enter on an empty line to have the current problem explained. Local
+models run as a Strands agent that can also read the calibration history and compare versions. It only
+explains: none of its tools can move the arm.
 
-The command line is the stable interface. The Python modules are importable, but their API may change
-between minor versions until 1.0.
+</details>
 
-## Troubleshooting
+<details>
+<summary><b>Try it without hardware</b></summary>
+
+```bash
+so101-cal --mock --mock-faults voltage:5         # see a failing check
+so101-cal --mock dashboard                       # the web version, http://127.0.0.1:8101
+```
+
+Faults: `missing:<id>`, `voltage:<V>`, `reversed:<joint>`, `stuck:<joint>`, `hot:<joint>` (prefix `leader.` for the leader).
+
+</details>
+
+<details>
+<summary><b>Where things are stored</b></summary>
+
+History: `~/.so101-calibrator/<arm>/v0001.json …` (plain JSON; `--store` or `$SO101CAL_HOME` to move it).
+Exports: the LeRobot cache, `~/.cache/huggingface/lerobot/calibration/robots/so_follower/<id>.json` and
+`teleoperators/so_leader/<id>.json` (or `$HF_LEROBOT_CALIBRATION`). A different existing file is kept as a
+`.bak`.
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
 
 | Symptom | Likely cause |
 | --- | --- |
-| No serial port disappears when unplugging | Charge-only USB cable, or the CH343 driver is missing (Windows) |
-| "No motor answers" | Power adapter off / not plugged, or the cable to the first motor |
-| Motors only answer at another baud rate | Motors were never set up: run `lerobot-setup-motors` once |
-| "Missing motor id(s): 4" | Loose daisy-chain cable going into that motor |
-| Direction mismatch on one joint | Motor or horn mounted the other way round on one arm |
-| Verify: EEPROM differs | Motor replaced, or another tool wrote a different calibration: recalibrate or `so101-cal write` |
-| The arm looks small | It is drawn with text characters; a larger terminal window gets a larger sprite |
+| No port disappears when unplugging | Charge-only USB cable, or the CH343 driver is missing (Windows) |
+| No motor answers | Power adapter off, or the cable to the first motor |
+| Motors answer at another baud rate | Run `lerobot-setup-motors` once |
+| Missing motor id 4 | Loose cable going into motor 4 |
+| Direction mismatch on one joint | A motor or horn is mounted the other way round |
+| EEPROM differs | Motor replaced or another tool wrote it: recalibrate or `so101-cal write` |
+
+</details>
+
+<details>
+<summary><b>How it relates to LeRobot</b></summary>
+
+Same math and file format as `lerobot-calibrate` for the SO-101 (homing offset = position − 2047, recorded
+min/max, `wrist_roll` 0..4095), through Feetech's `scservo_sdk`, so neither LeRobot nor PyTorch is needed.
+Built against LeRobot 0.6.1. The command line is the stable interface; the Python API may change before 1.0.
+
+</details>
 
 ## Contributing
 
-See [CONTRIBUTING.md](https://github.com/fport/so101-calibrator/blob/main/CONTRIBUTING.md). Reports
-from real arms that help tune the thresholds in `profiles.py` are very welcome.
+Reports from real arms are very welcome. See [CONTRIBUTING.md](https://github.com/fport/so101-calibrator/blob/main/CONTRIBUTING.md).
 
-## License
-
-[MIT](https://github.com/fport/so101-calibrator/blob/main/LICENSE). The SO-101 pixel art is rendered
-from the [SO-ARM100](https://github.com/TheRobotStudio/SO-ARM100) model (Apache-2.0).
+<sub>MIT. The SO-101 pixel art is rendered from the <a href="https://github.com/TheRobotStudio/SO-ARM100">SO-ARM100</a> model (Apache-2.0).</sub>
