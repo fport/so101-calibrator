@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --extra hardware
+      - run: uv run ruff check .
+      - run: uv run pytest -q
+      - name: Mock end-to-end (CLI)
+        shell: bash
+        env:
+          SO101CAL_HOME: ${{ runner.temp }}/store
+          HF_LEROBOT_CALIBRATION: ${{ runner.temp }}/lerobot
+        run: |
+          uv run so101-cal --mock --mock-speed 4 calibrate leader --yes
+          uv run so101-cal --mock --mock-speed 4 calibrate follower --yes
+          uv run so101-cal --mock verify follower --yes
+          uv run so101-cal --mock teleop-test --seconds 3 --yes
+          uv run so101-cal history

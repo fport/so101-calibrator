@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SO-101 Calibrator</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='none' stroke='%23e8833a' stroke-width='2'/><circle cx='8' cy='8' r='2' fill='%23e8833a'/></svg>">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div>
+        <h1>so101-calibrator</h1>
+        <p class="sub">Step-by-step, checked and versioned calibration for SO-101 arms</p>
+      </div>
+    </div>
+    <div class="meta">
+      <span id="mock-badge" class="badge warn" hidden>MOCK HARDWARE</span>
+      <span class="path" id="store-path"></span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="col steps-col">
+      <div class="panel" id="start-panel">
+        <h2>New run</h2>
+        <div class="seg" id="flow-seg" role="tablist">
+          <button data-flow="calibrate" class="on">Calibrate</button>
+          <button data-flow="verify">Verify</button>
+          <button data-flow="teleop">Teleop test</button>
+        </div>
+        <form id="start-form" autocomplete="off"></form>
+      </div>
+      <div class="panel" id="steps-panel" hidden>
+        <div class="row between">
+          <h2 id="flow-title">Calibration</h2>
+          <button class="ghost small" id="close-btn" title="Close this run">Close</button>
+        </div>
+        <ol class="steps" id="steps"></ol>
+      </div>
+    </section>
+
+    <section class="col main-col">
+      <div class="panel step-card" id="step-card">
+        <div class="empty" id="empty-state">
+          <h2>Ready when you are</h2>
+          <p>Pick a run on the left. <b>Calibrate</b> walks one arm through port, motors, power, middle pose,
+            ranges and directions, then saves a new version. <b>Verify</b> checks an existing calibration.
+            <b>Teleop test</b> drives the follower from the leader and measures tracking.</p>
+        </div>
+        <div id="step-body" hidden>
+          <div class="row between">
+            <div>
+              <div class="eyebrow" id="step-count"></div>
+              <h2 id="step-title"></h2>
+            </div>
+            <span class="chip" id="step-status"></span>
+          </div>
+          <p class="instructions" id="step-instructions"></p>
+          <div id="step-progress"></div>
+          <div class="actions" id="step-actions"></div>
+          <ul class="checks" id="step-checks"></ul>
+        </div>
+        <div id="result-body" hidden></div>
+      </div>
+      <div class="panel">
+        <h2>Log</h2>
+        <ul class="log" id="log"></ul>
+      </div>
+    </section>
+
+    <section class="col live-col">
+      <div class="panel">
+        <div class="row between">
+          <h2>Live joints</h2>
+          <span class="legend"><i class="lg cal"></i>calibrated <i class="lg rec"></i>recorded <i class="lg pos"></i>now</span>
+        </div>
+        <div id="live"><p class="muted">Joint positions appear once the motors are connected.</p></div>
+      </div>
+    </section>
+
+    <section class="col history-col">
+      <div class="panel">
+        <div class="row between">
+          <h2>Calibration history</h2>
+          <span class="muted small" id="lerobot-root"></span>
+        </div>
+        <div class="tabs" id="arm-tabs"></div>
+        <div id="history"><p class="muted">No calibrations stored yet.</p></div>
+        <div id="diff"></div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
