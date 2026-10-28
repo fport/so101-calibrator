@@ -20,6 +20,7 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from . import settings
 from .profiles import JOINTS
 
 PROVIDERS = ("claude", "ollama", "openai")
@@ -61,27 +62,17 @@ def parse_spec(spec: str) -> tuple[str, str]:
 
 
 # --- configuration ---------------------------------------------------------------------------------
-def config_path(store_root) -> os.PathLike:
-    return store_root / "config.json"
-
-
 def load_spec(store_root, override: str | None = None) -> str | None:
+    """--ai flag, then $SO101CAL_AI, then `so101-cal ai use ...`; "off" disables."""
     if override:
         return None if override == "off" else override
     if os.environ.get("SO101CAL_AI"):
         return os.environ["SO101CAL_AI"]
-    p = config_path(store_root)
-    if p.exists():
-        return json.loads(p.read_text()).get("ai")
-    return None
+    return settings.load(store_root).get("ai")
 
 
 def save_spec(store_root, spec: str | None) -> None:
-    p = config_path(store_root)
-    data = json.loads(p.read_text()) if p.exists() else {}
-    data["ai"] = spec
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(data, indent=2) + "\n")
+    settings.update(store_root, ai=spec)
 
 
 # --- state -> prompt ---------------------------------------------------------------------------------

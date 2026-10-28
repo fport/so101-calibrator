@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 from . import calibration as C
 from . import checks as K
+from . import i18n
 from . import profiles as P
 from .bus import Arm, BusError, MotorBus
 from .ports import diff_ports
@@ -137,9 +138,13 @@ class Step:
     def instructions(self, s: Session) -> str:
         return ""
 
+    def hint_spec(self, s: Session) -> tuple[str, dict]:
+        """What to do now, as an i18n key and its arguments (front ends render it in their language)."""
+        return f"hint.{self.kind}", {}
+
     def hint(self, s: Session) -> str:
-        """One short line telling the user what to do now (details are in instructions())."""
-        return self.title
+        """The hint in plain English (CLI, dashboard, AI prompt)."""
+        return i18n.plain(i18n.hint(*self.hint_spec(s), lang="en"))
 
     def illustration(self, s: Session) -> str | None:
         """Name of the animation the front ends show for this step (see so101_calibrator.assets)."""
@@ -186,13 +191,12 @@ class PortStep(Step):
         return (f"Plug in ONLY the {self.role}'s USB cable and power. Press Start, then unplug the {self.role}'s "
                 "USB cable. Plug it back in when asked. The port is detected automatically.")
 
-    def hint(self, s):
-        if s.targets[self.role].port and self.phase == "idle":
-            return f"Using {s.targets[self.role].port}"
-        return {"unplug": f"Unplug the {self.role}'s USB cable now",
-                "replug": "Plug it back in",
-                "ambiguous": "Several ports vanished: plug in only this arm"}.get(
-            self.phase, f"Start, then unplug the {self.role}'s USB cable")
+    def hint_spec(self, s):
+        port = s.targets[self.role].port
+        if port and self.phase == "idle":
+            return "hint.port.known", {"port": port}
+        phase = self.phase if self.phase in ("unplug", "replug", "ambiguous") else "ready"
+        return f"hint.port.{phase}", {"role": self.role}
 
     def illustration(self, s):
         return "usb"
@@ -244,8 +248,6 @@ class MotorsStep(Step):
         return (f"Connects to {s.targets[self.role].port} at 1 Mbps and looks for motor ids 1-6 "
                 f"({', '.join(JOINTS)}). The {self.role}'s power supply must be on.")
 
-    def hint(self, s):
-        return f"Power on, then scan motors 1-6 on {s.targets[self.role].port}"
 
     def illustration(self, s):
         return "scan"
@@ -280,9 +282,9 @@ class PowerStep(Step):
         prof = s.profile(self.role)
         return f"Reads every motor's voltage and temperature. Expected {prof.voltage_min}-{prof.voltage_max} V."
 
-    def hint(self, s):
+    def hint_spec(self, s):
         prof = s.profile(self.role)
-        return f"Check supply: {prof.voltage_min:g}-{prof.voltage_max:g} V"
+        return "hint.power", {"lo": f"{prof.voltage_min:g}", "hi": f"{prof.voltage_max:g}"}
 
     def illustration(self, s):
         return "power"
@@ -300,8 +302,6 @@ class HomingStep(Step):
                 "and forearm forming a right angle, wrist straight, gripper half open). Hold it still and "
                 "press Start. This sets the homing offsets.")
 
-    def hint(self, s):
-        return "Put every joint in the middle of its range, hold still"
 
     def illustration(self, s):
         return "middle"
@@ -330,10 +330,6 @@ class RangesStep(Step):
         return ("Press Start, then move each joint EXCEPT wrist_roll slowly all the way to both mechanical "
                 "stops, one at a time. Watch the bars fill. Return the arm to the middle and press Stop.")
 
-    def hint(self, s):
-        if self.running(s):
-            return "Move each joint to both stops, back to the middle, then Stop"
-        return "Start, then move each joint (not wrist_roll) to both stops"
 
     def illustration(self, s):
         return "ranges"
@@ -382,10 +378,10 @@ class DirectionStep(Step):
     def current(self) -> str | None:
         return next((j for j in JOINTS if j not in self.signs), None)
 
-    def hint(self, s):
+    def hint_spec(self, s):
         if self.running(s) and self.current:
-            return f"{self.current}: {P.DIRECTION_PROMPTS[self.current]}"
-        return "Start, then move each joint a little as shown"
+            return "hint.direction", {"joint": self.current}
+        return "hint.direction.ready", {}
 
     def illustration(self, s):
         return f"direction_{self.current or JOINTS[0]}"
@@ -445,8 +441,6 @@ class SaveStep(Step):
         return ("Writes the ranges to the motors, reads them back, stores a new version in the calibration "
                 f"history{tail}.")
 
-    def hint(self, s):
-        return "Write to the motors and save a new version"
 
     def illustration(self, s):
         return "save"
@@ -488,8 +482,6 @@ class MatchStep(Step):
     def instructions(self, s):
         return "Reads offsets and limits from the motors and compares them with the active stored version."
 
-    def hint(self, s):
-        return "Compare the motors with the stored calibration"
 
     def illustration(self, s):
         return "scan"
@@ -512,8 +504,6 @@ class PoseStep(Step):
         return ("Move the arm by hand into the same middle pose used for calibration and press Start. Each "
                 "joint should read close to 2047 again.")
 
-    def hint(self, s):
-        return "Put the arm in the middle pose again, hold still"
 
     def illustration(self, s):
         return "middle"
@@ -553,10 +543,8 @@ class TeleopStep(Step):
                 f"turns on and it mirrors the leader for {s.ctx.teleop_seconds:.0f} s (or until Stop). Move "
                 "slowly through all joints. When it stops the follower goes limp: keep a hand near it.")
 
-    def hint(self, s):
-        if self.running(s):
-            return "Move the leader slowly; the follower mirrors it"
-        return "Put both arms in the same pose, then Start"
+    def hint_spec(self, s):
+        return ("hint.teleop", {}) if self.running(s) else ("hint.teleop.ready", {})
 
     def illustration(self, s):
         return "teleop"
@@ -869,9 +857,11 @@ class Session:
                 can = {"start": status == "ready", "stop": status == "running",
                        "retry": status in ("warn", "fail", "running"), "accept": status == "warn",
                        "force": status == "fail"}
+                hint_key, hint_args = st.hint_spec(self)
                 current = {
-                    "id": st.id, "label": st.label, "live": st.is_live(self), "status": status,
-                    "instructions": st.instructions(self), "hint": st.hint(self), "progress": st.progress(self),
+                    "id": st.id, "kind": st.kind, "role": st.role, "label": st.label, "live": st.is_live(self),
+                    "status": status, "instructions": st.instructions(self), "hint": st.hint(self),
+                    "hint_key": hint_key, "hint_args": hint_args, "progress": st.progress(self),
                     "illustration": st.illustration(self), "can": can,
                     # what Enter / the main button does
                     "primary": next((a for a in ("start", "stop", "accept", "retry") if can[a]), None),
@@ -901,7 +891,8 @@ class Session:
             return {
                 "flow": self.flow,
                 "targets": {r: t.__dict__.copy() for r, t in self.targets.items()},
-                "steps": [{"id": s.id, "label": s.label, "status": self.states[s.id].status,
+                "steps": [{"id": s.id, "kind": s.kind, "role": s.role, "label": s.label,
+                           "status": self.states[s.id].status,
                            "checks": [c.to_dict() for c in self.results.get(s.id, [])]} for s in self.steps],
                 "current": current,
                 "finished": self.finished,

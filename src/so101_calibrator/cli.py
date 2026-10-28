@@ -185,7 +185,7 @@ def cmd_where(args, env: Env) -> int:
 def cmd_tui(args, env: Env) -> int:
     from .tui import run
 
-    return run(env, args.ai)
+    return run(env, args.ai, args.lang)
 
 
 def cmd_ai(args, env: Env) -> int:
@@ -239,6 +239,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mock-speed", type=float, default=1.0, help="speed-up of the simulated hand")
     p.add_argument("--ai", metavar="SPEC", help="AI helper: ollama[:model], claude[:model], openai:<model> or off "
                    "(default: `so101-cal ai use ...` or $SO101CAL_AI)")
+    p.add_argument("--lang", choices=["en", "tr"], help="language of the terminal UI (default: saved choice or locale)")
     sub = p.add_subparsers(dest="cmd", metavar="command")
     p.set_defaults(func=cmd_tui)
 

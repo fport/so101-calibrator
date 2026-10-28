@@ -3,6 +3,7 @@ import time
 
 from textual.widgets import Input, Static
 
+from so101_calibrator import settings
 from so101_calibrator.tui import CalApp
 from so101_calibrator.tui.screens import HistoryScreen, RunScreen
 from so101_calibrator.tui.widgets import AIPanel
@@ -11,7 +12,7 @@ from .conftest import mock_env
 
 
 def make_app(faults: str | None = None) -> CalApp:
-    return CalApp(mock_env(faults), "off")
+    return CalApp(mock_env(faults), "off", "en")
 
 
 async def run_calibration(app: CalApp, pilot) -> dict:
@@ -45,8 +46,8 @@ def test_tui_calibrate_history_and_ai_setup():
             snap = await run_calibration(app, pilot)
             assert snap["result"] == "pass" and snap["record"] == 1
             await pilot.pause(0.2)
-            head = str(app.screen.query_one("#head", Static).render())
-            assert "All checks passed" in head
+            head = str(app.screen.query_one("#hint", Static).render())
+            assert "Done" in head
 
             await pilot.press("enter")  # done -> home
             await pilot.pause(0.2)
@@ -62,7 +63,7 @@ def test_tui_calibrate_history_and_ai_setup():
             await pilot.press("a")
             await pilot.pause(0.1)
             panel = app.screen.query_one(AIPanel)
-            assert panel.display and "AI is off" in panel.query_one(Input).placeholder
+            assert panel.display and "Assistant is off" in panel.query_one(Input).placeholder
             for ch in "ollama:tiny":
                 await pilot.press(ch)
             await pilot.press("enter")
@@ -127,5 +128,22 @@ def test_tui_ai_answer_uses_session_state():
             assert "12 V adapter" in answer
             power = next(s for s in app.assistant.states[0]["steps"] if s["step"] == "Check supply voltage")
             assert power["status"] == "fail"
+
+    asyncio.run(scenario())
+
+
+def test_tui_language_toggle_is_remembered():
+    async def scenario():
+        app = make_app()
+        async with app.run_test(size=(120, 40)) as pilot:
+            await pilot.pause(0.2)
+            assert "CALIBRATION" in str(app.screen.query_one("#title", Static).render())
+            await pilot.press("l")
+            await pilot.pause(0.1)
+            assert "KALİBRASYON" in str(app.screen.query_one("#title", Static).render())
+            await pilot.press("enter")
+            await pilot.pause(0.3)
+            assert "USB portu" in str(app.screen.query_one("#progress-dots", Static).render())
+        assert settings.load(app.env.store.root)["lang"] == "tr"  # the next start opens in Turkish
 
     asyncio.run(scenario())

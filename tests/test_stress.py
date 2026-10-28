@@ -75,7 +75,7 @@ def test_tui_random_keys_never_crash(seed):
 
     async def scenario():
         faults = FAULTS[seed % len(FAULTS)]
-        app = CalApp(mock_env(faults), "off")
+        app = CalApp(mock_env(faults), "off", "en")
         rng = random.Random(seed)
         async with app.run_test(size=(100, 32)) as pilot:
             for _ in range(160):

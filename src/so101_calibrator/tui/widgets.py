@@ -1,4 +1,4 @@
-"""Reusable TUI pieces: the SO-101 animation, the AI panel, joint bars and the key hint line."""
+"""TUI building blocks: the SO-101 sprite, emphasised text, the key line, joint details, the assistant."""
 
 from __future__ import annotations
 
@@ -17,17 +17,15 @@ from textual.widgets import Input, Static
 
 from .. import ai as AI
 from .. import assets
+from ..i18n import t
 from ..profiles import HALF_TURN, JOINTS, RESOLUTION
+from ..theme import GRAPHITE, Theme
 
 if TYPE_CHECKING:
     from .app import CalApp
 
-ICON = {"pass": ("✓", "green"), "warn": ("!", "yellow"), "fail": ("✗", "red"), "running": ("●", "cyan"),
-        "ready": ("›", "bold"), "pending": ("·", "dim")}
-STORED = "steel_blue"
-RECORDED = "dark_orange"
-# illustrations without a clip of their own
-ALIASES = {"power": "idle", "save": "idle"}
+THEME: Theme = GRAPHITE
+ALIASES = {"power": "idle", "save": "idle"}  # steps without a clip of their own
 
 
 def ago(iso: str) -> str:
@@ -37,107 +35,114 @@ def ago(iso: str) -> str:
         return ""
     for unit, n in (("d", 86400), ("h", 3600), ("min", 60)):
         if secs >= n:
-            return f"{int(secs // n)}{unit} ago"
-    return "just now"
+            return t(f"ago.{unit}", n=int(secs // n))
+    return t("ago.now")
 
 
-def keys_line(*pairs: tuple[str, str]) -> Text:
-    t = Text()
-    for k, label in pairs:
-        t.append(f" {k} ", style="bold black on grey70")
-        t.append(f" {label}   ")
-    return t
+def emphasis(text: str, style: str, accent: str | None = None) -> Text:
+    """Text with *marked* words in the accent colour."""
+    out = Text()
+    for i, part in enumerate(text.split("*")):
+        out.append(part, style=f"{style} {accent or THEME.accent}" if i % 2 else style)
+    return out
 
 
-# --- the animation -----------------------------------------------------------------------------------
-@lru_cache(maxsize=4096)
-def _style(fg: tuple[int, int, int] | None, bg: tuple[int, int, int] | None) -> Style:
-    return Style(color=Color.from_rgb(*fg) if fg else None, bgcolor=Color.from_rgb(*bg) if bg else None)
+def keys(*pairs: tuple[str, str], first_is_primary: bool = True) -> Text:
+    """'⏎ done   r retry   esc cancel': the primary key boxed in the accent colour."""
+    out = Text(justify="center")
+    for n, (key, label) in enumerate(pairs):
+        if n:
+            out.append("     ")
+        if n == 0 and first_is_primary:
+            out.append(f" {key} ", style=f"bold {THEME.bg} on {THEME.accent}")
+            out.append(f" {label}", style=THEME.fg)
+        else:
+            out.append(key, style=f"bold {THEME.fg}")
+            out.append(f" {label}", style=THEME.dim)
+    return out
 
 
-def halfblocks(img) -> Text:
-    """An RGBA image as text, two pixels per cell (upper half block: fg = top pixel, bg = bottom pixel).
-    Transparent pixels stay the terminal background."""
-    w, h = img.size
-    px = img.load()
-    t = Text(no_wrap=True, overflow="crop")
-    for y in range(0, h - 1, 2):
+# --- the sprite ----------------------------------------------------------------------------------------
+@lru_cache(maxsize=1024)
+def _style(fg: str | None, bg: str | None) -> Style:
+    return Style(color=Color.parse(fg) if fg else None, bgcolor=Color.parse(bg) if bg else None)
+
+
+def sprite_text(frame: bytes, w: int, h: int, colours: tuple[str | None, ...]) -> Text:
+    """Role indices -> half-block text: one cell shows the pixel above (fg) and the one below (bg)."""
+    out = Text(no_wrap=True, overflow="crop", justify="center")
+    for y in range(0, h, 2):
         for x in range(w):
-            top, bot = px[x, y], px[x, y + 1]
-            a = top[:3] if top[3] > 96 else None
-            b = bot[:3] if bot[3] > 96 else None
-            if a is None and b is None:
-                t.append(" ")
-            elif b is None:
-                t.append("▀", _style(a, None))
-            elif a is None:
-                t.append("▄", _style(b, None))
+            top = colours[frame[y * w + x]]
+            bottom = colours[frame[(y + 1) * w + x]] if y + 1 < h else None
+            if top is None and bottom is None:
+                out.append(" ")
+            elif bottom is None:
+                out.append("▀", _style(top, None))
+            elif top is None:
+                out.append("▄", _style(bottom, None))
             else:
-                t.append("▀", _style(a, b))
-        t.append("\n")
-    return t
+                out.append("▀", _style(top, bottom))
+        out.append("\n")
+    return out
 
 
-USB_FRAMES = 16
+def usb_frame(i: int) -> Text:
+    """A board with its USB cable sliding out and back in."""
+    gap = [0, 0, 0, 1, 2, 3, 4, 5, 6, 6, 6, 6, 5, 4, 2, 0][i % 16]
+    out = Text(justify="center", no_wrap=True)
+    out.append("╭────────────╮" + " " * 34 + "\n", style=THEME.dim)
+    out.append("│", style=THEME.dim)
+    out.append("   SO-101   ", style=f"bold {THEME.fg}")
+    out.append("│" + " " * gap, style=THEME.dim)
+    out.append("▐█▌", style=f"bold {THEME.accent}")
+    out.append("━" * (31 - gap) + "\n", style=THEME.dim)
+    out.append("╰────────────╯" + " " * 34 + "\n", style=THEME.dim)
+    return out
 
 
-def usb_frame(i: int, width: int) -> Text:
-    """A board with a USB cable sliding out and back in (for the find-the-port step)."""
-    gap = [0, 0, 0, 1, 2, 3, 4, 5, 6, 6, 6, 6, 5, 4, 2, 0][i % USB_FRAMES]
-    cable = max(4, width - 24 - gap)
-    t = Text(no_wrap=True)
-    t.append("\n\n  ╭──────────────╮\n", style="grey62")
-    t.append("  │  ", style="grey62")
-    t.append("motor board", style="bold")
-    t.append(" │", style="grey62")
-    t.append(" " * gap)
-    t.append("▐█▌", style="bold dark_orange")
-    t.append("━" * cable + "\n", style="grey70")
-    t.append("  ╰──────────────╯\n", style="grey62")
-    return t
+class Sprite(Widget):
+    """Plays a clip from so101_calibrator.assets at the largest size that fits."""
 
+    DEFAULT_CSS = "Sprite { width: 1fr; height: 1fr; content-align: center middle; }"
 
-class Illustration(Widget):
-    """Plays the SO-101 clip a step asks for, scaled to the widget (half-block pixels)."""
-
-    DEFAULT_CSS = "Illustration { width: 1fr; height: 1fr; }"
-
-    def __init__(self, **kw):
+    def __init__(self, clip: str | None = None, kind: str = "step", **kw):
         super().__init__(**kw)
-        self.clip: str | None = None
-        self.index = 0
-        self.next_at = 0.0
-        self._cache: dict[tuple, list[tuple[Text, int]]] = {}
+        self.clip, self.kind = clip, kind
+        self.index, self.next_at = 0, 0.0
+        self._cache: dict[tuple, list[tuple[Text, float]]] = {}
 
     def on_mount(self) -> None:
-        self.set_interval(1 / 24, self._advance)
+        self.set_interval(1 / 24, self._tick)
 
-    def show(self, clip: str | None) -> None:
+    def show(self, clip: str | None, kind: str = "step") -> None:
         clip = ALIASES.get(clip or "", clip)
-        if clip != self.clip:
-            self.clip, self.index, self.next_at = clip, 0, 0.0
+        if (clip, kind) != (self.clip, self.kind):
+            self.clip, self.kind, self.index, self.next_at = clip, kind, 0, 0.0
             self.refresh()
 
-    def _frames(self) -> list[tuple[Text, int]]:
-        w, h = self.size.width, self.size.height
-        if not self.clip or w < 8 or h < 4:
+    def _frames(self) -> list[tuple[Text, float]]:
+        if not self.clip:
             return []
-        key = (self.clip, w, h)
+        if self.clip == "usb":
+            return [(usb_frame(i), 0.11) for i in range(16)]
+        size = assets.best_size(self.clip, self.size.width, self.size.height * 2)
+        if size is None:
+            return []
+        key = (self.clip, size, self.kind)
         if key not in self._cache:
-            if self.clip == "usb":
-                self._cache[key] = [(usb_frame(i, w), 110) for i in range(USB_FRAMES)]
-            else:
-                self._cache[key] = [(halfblocks(img), ms) for img, ms in assets.frames(self.clip, (w, h * 2))]
+            frames, w, h = assets.frames(self.clip, size)
+            palette = THEME.sprite(self.kind)
+            colours = tuple(palette.get(role) for role in assets.ROLES)
+            delay = 1 / assets.index()[self.clip]["fps"]
+            self._cache[key] = [(sprite_text(f, w, h, colours), delay) for f in frames]
         return self._cache[key]
 
-    def _advance(self) -> None:
+    def _tick(self) -> None:
         frames = self._frames()
-        if len(frames) < 2:
-            return
-        now = time.monotonic()
-        if now >= self.next_at:
+        if len(frames) > 1 and time.monotonic() >= self.next_at:
             self.index = (self.index + 1) % len(frames)
-            self.next_at = now + frames[self.index][1] / 1000
+            self.next_at = time.monotonic() + frames[self.index][1]
             self.refresh()
 
     def render(self) -> Text:
@@ -145,69 +150,53 @@ class Illustration(Widget):
         return frames[self.index % len(frames)][0] if frames else Text("")
 
 
-# --- joint bars --------------------------------------------------------------------------------------
+# --- joint details (toggled with j) ----------------------------------------------------------------------
 def joint_bar(raw, lo, hi, rec_lo, rec_hi, width: int) -> Text:
-    """0..4095 on `width` cells: stored range (blue), range recorded now (orange), centre tick, position."""
+    """0..4095: stored range (grey), range recorded now (orange), the position (bright)."""
     def cell(v):
         return max(0, min(width - 1, int(v * width / RESOLUTION)))
 
-    cells = [("─", "grey30")] * width
-    for a, b, style in ((lo, hi, STORED), (rec_lo, rec_hi, RECORDED)):
+    cells = [("─", THEME.surface)] * width
+    for a, b, colour in ((lo, hi, THEME.dim), (rec_lo, rec_hi, THEME.accent)):
         if a is not None and b is not None:
             for i in range(cell(a), cell(b) + 1):
-                cells[i] = ("━", style)
+                cells[i] = ("━", colour)
     c = cell(HALF_TURN)
     if cells[c][0] == "─":
-        cells[c] = ("┊", "grey50")
+        cells[c] = ("┊", THEME.dim)
     if raw is not None:
-        cells[cell(raw)] = ("█", "bold white")
-    t = Text()
+        cells[cell(raw)] = ("┃", f"bold {THEME.fg}")
+    out = Text()
     for ch, style in cells:
-        t.append(ch, style=style)
-    return t
-
-
-def fill_bar(frac: float, width: int = 30) -> Text:
-    n = int(round(max(0.0, min(1.0, frac)) * width))
-    t = Text("█" * n, style=RECORDED)
-    t.append("░" * (width - n), style="grey30")
-    t.append(f" {frac * 100:3.0f}%")
-    return t
+        out.append(ch, style=style)
+    return out
 
 
 def joints_text(snap: dict, width: int) -> Text:
-    """Live joint bars of every connected arm (nothing for an arm that is not connected yet)."""
     cur = snap.get("current") or {}
     recorded = (cur.get("progress") or {}).get("recorded", {})
-    t = Text()
+    out = Text(justify="center")
     for role, arm in snap["arms"].items():
         if not arm["connected"]:
             continue
-        t.append(f"{role}", style="bold")
-        t.append(f"  {arm['arm_id']}  {arm['port']}\n", style="dim")
+        out.append(f"{role}  {arm['port']}\n", style=THEME.dim)
         for j in JOINTS:
-            info = arm["joints"][j]
-            r = recorded.get(j, {})
-            t.append(f" {j:<13} ")
-            t.append_text(joint_bar(info["raw"], info["cal_min"], info["cal_max"], r.get("min"), r.get("max"), width))
-            t.append(f" {'' if info['raw'] is None else info['raw']:>4}", style="bold")
-            t.append(f" {'' if info['norm'] is None else format(info['norm'], '+.0f'):>5}\n", style="dim")
-        t.append("\n")
-    if t.plain:
-        t.append(" ━ stored range  ", style=STORED)
-        t.append("━ recorded now  ", style=RECORDED)
-        t.append("█ position", style="bold")
-    return t
+            info, r = arm["joints"][j], recorded.get(j, {})
+            out.append(f"{j:<14}", style=THEME.dim)
+            out.append_text(joint_bar(info["raw"], info["cal_min"], info["cal_max"], r.get("min"), r.get("max"), width))
+            out.append(f" {'' if info['raw'] is None else info['raw']:>4}\n", style=f"bold {THEME.fg}")
+    return out
 
 
-# --- AI ------------------------------------------------------------------------------------------------
+# --- assistant ---------------------------------------------------------------------------------------------
 class AIPanel(Vertical):
     """Hidden until `a`. An empty question means: explain the current problem."""
 
-    DEFAULT_CSS = """
-    AIPanel { height: auto; max-height: 16; border: round $accent; margin: 0 1; padding: 0 1; display: none; }
-    AIPanel #ai-answer { height: auto; }
-    AIPanel Input { border: none; height: 1; padding: 0; }
+    DEFAULT_CSS = f"""
+    AIPanel {{ height: auto; max-height: 14; width: 90; border: round {THEME.dim}; padding: 0 1; display: none;
+               margin: 0 0 1 0; }}
+    AIPanel #ai-answer {{ height: auto; }}
+    AIPanel Input {{ border: none; height: 1; padding: 0; background: {THEME.surface}; }}
     """
 
     def compose(self) -> ComposeResult:
@@ -221,10 +210,7 @@ class AIPanel(Vertical):
     def open(self) -> None:
         assistant = self.cal_app.assistant
         inp = self.query_one(Input)
-        if assistant:
-            inp.placeholder = f"Ask {assistant.label} (Enter on empty: explain the current problem)"
-        else:
-            inp.placeholder = "AI is off. Type a model to turn it on: ollama, claude, openai:<model>"
+        inp.placeholder = t("ai.ask", model=assistant.label) if assistant else t("ai.off")
         self.display = True
         inp.disabled = False
         inp.focus()
@@ -235,7 +221,7 @@ class AIPanel(Vertical):
         self.screen.focus_next()
 
     def say(self, text: str, style: str = "") -> None:
-        self.query_one("#ai-answer", Static).update(Text(text, style=style))
+        self.query_one("#ai-answer", Static).update(Text(text, style=style or THEME.fg))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         app = self.cal_app
@@ -243,29 +229,28 @@ class AIPanel(Vertical):
         event.input.value = ""
         if app.assistant is None:
             if not question.strip():
-                self.say("Examples: ollama  ·  ollama:qwen2.5  ·  claude  ·  openai:<model> with SO101CAL_AI_URL",
-                         "dim")
+                self.say(t("ai.off"), THEME.dim)
                 return
             try:
                 app.set_ai(question.strip())
             except AI.AIError as e:
-                self.say(str(e), "red")
+                self.say(str(e), THEME.error)
                 return
-            self.say(f"AI on: {app.assistant.label}. Ask away.", "green")
+            self.say(t("ai.on", model=app.assistant.label), THEME.accent)
             self.open()
             return
-        self.say("thinking…", "dim italic")
+        self.say(t("ai.thinking"), THEME.dim)
         state = AI.describe(app.controller.snapshot(), app.env.store.arms())
         assistant = app.assistant
 
         def work() -> None:
             try:
-                answer = assistant.ask(question, state, on_text=lambda t: app.call_from_thread(self.say, t))
+                answer = assistant.ask(question, state, on_text=lambda s: app.call_from_thread(self.say, s))
                 style = ""
             except AI.AIError as e:
-                answer, style = str(e), "red"
+                answer, style = str(e), THEME.error
             except Exception as e:  # a model/network hiccup must never take the calibration UI down
-                answer, style = f"AI error: {type(e).__name__}: {e}", "red"
+                answer, style = f"{type(e).__name__}: {e}", THEME.error
             app.call_from_thread(self.say, answer, style)
 
         self.run_worker(work, thread=True, exclusive=True, group="ai")
