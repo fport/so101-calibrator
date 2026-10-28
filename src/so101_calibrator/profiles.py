@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 # STS3215: 12-bit magnetic encoder, model number 777.
 RESOLUTION = 4096
@@ -91,7 +91,7 @@ def profile(role: str, supply: str | None = None) -> RoleProfile:
     if supply is None:
         return base
     lo, hi = SUPPLY_PRESETS[supply]
-    return RoleProfile(**{**base.__dict__, "voltage_min": lo, "voltage_max": hi})
+    return replace(base, voltage_min=lo, voltage_max=hi)
 
 
 # Thresholds shared by the checks (raw encoder ticks unless stated otherwise).

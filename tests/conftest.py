@@ -1,5 +1,6 @@
 import pytest
 
+from so101_calibrator.env import Env
 from so101_calibrator.mock import MockHand, MockRig
 from so101_calibrator.store import Store
 from so101_calibrator.wizard import Context, Session, Target
@@ -75,3 +76,8 @@ def calibrate(store, rig, role, arm_id=None, port_known=False, **ctx_kw):
     ctx = make_ctx(store, rig, **ctx_kw)
     target = Target(role, arm_id or role, port=rig.port_of(role) if port_known else None)
     return drive(Session.calibrate(ctx, target), rig)
+
+
+def mock_env(faults: str | None = None, speed: float = 20) -> Env:
+    """A simulated rig in the test's store ($SO101CAL_HOME)."""
+    return Env(Store(), mock=True, mock_faults=faults, mock_speed=speed)

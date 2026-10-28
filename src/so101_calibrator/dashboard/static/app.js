@@ -4,7 +4,7 @@
 const $ = (id) => document.getElementById(id);
 const JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"];
 const MAX = 4095;
-const ICON = { pass: "✓", warn: "!", fail: "✕", skipped: "–", running: "•", ready: "›", pending: "" };
+const ICON = { pass: "✓", warn: "!", fail: "✕", running: "•", ready: "›", pending: "" };
 const FLOW_TITLES = { calibrate: "Calibration", verify: "Verification", teleop: "Teleop test" };
 
 let state = null;
@@ -126,7 +126,9 @@ async function act(action) {
   if (busy) return;
   busy = true;
   try {
-    await api("/api/session/action", { action });
+    // the step this button belonged to: a stale or double click cannot act on the next step
+    const step = state && state.session && state.session.current ? state.session.current.id : null;
+    await api("/api/session/action", { action, step });
     viewStep = null;
   } catch (err) {
     toast(err.message);
@@ -193,11 +195,10 @@ function renderCurrent(s, c) {
   setHTML("step-actions",
     btn("start", c.live ? "Start" : "Run step", "primary", c.can.start) +
     btn("stop", "Stop & check", "primary", c.can.stop) +
-    btn("next", "Continue anyway", "primary", c.can.next) +
-    btn("retry", "Retry", c.can.next ? "secondary" : "primary", c.can.retry && c.status !== "running") +
+    btn("accept", "Continue anyway", "primary", c.can.accept) +
+    btn("retry", "Retry", c.can.accept ? "secondary" : "primary", c.can.retry && c.status !== "running") +
     btn("retry", "Cancel", "ghost", c.status === "running") +
     btn("force", "Accept failure", "danger", c.can.force) +
-    btn("skip", "Skip", "ghost", c.can.skip) +
     btn("abort", "Abort run", "ghost", true));
   const step = s.steps[idx];
   setHTML("step-checks", checksHtml(step.checks));

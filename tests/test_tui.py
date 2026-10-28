@@ -3,13 +3,15 @@ import time
 
 from textual.widgets import Input, Static
 
-from so101_calibrator.cli import Env, build_parser
-from so101_calibrator.tui import AIPanel, CalApp, HistoryScreen, RunScreen
+from so101_calibrator.tui import CalApp
+from so101_calibrator.tui.screens import HistoryScreen, RunScreen
+from so101_calibrator.tui.widgets import AIPanel
+
+from .conftest import mock_env
 
 
-def make_app(*extra) -> CalApp:
-    args = build_parser().parse_args(["--mock", "--mock-speed", "20", *extra])
-    return CalApp(Env(args), "off")
+def make_app(faults: str | None = None) -> CalApp:
+    return CalApp(mock_env(faults), "off")
 
 
 async def run_calibration(app: CalApp, pilot) -> dict:
@@ -19,7 +21,7 @@ async def run_calibration(app: CalApp, pilot) -> dict:
     assert isinstance(app.screen, RunScreen)
     t0 = time.monotonic()
     while time.monotonic() - t0 < 60:
-        snap = app.snapshot()
+        snap = app.controller.snapshot()
         if snap["finished"]:
             return snap
         cur = snap["current"]
@@ -48,8 +50,8 @@ def test_tui_calibrate_history_and_ai_setup():
 
             await pilot.press("enter")  # done -> home
             await pilot.pause(0.2)
-            assert app.runner.session is None
-            assert app.runner.env.store.active("follower").version == 1
+            assert app.controller.session is None
+            assert app.env.store.active("follower").version == 1
 
             await pilot.press("h")
             await pilot.pause(0.2)
@@ -85,7 +87,7 @@ def test_tui_abort_needs_two_escapes():
             assert "press again" in str(app.screen.query_one("#keys", Static).render())
             await pilot.press("escape")
             await pilot.pause(0.2)
-            assert not isinstance(app.screen, RunScreen) and app.runner.session is None
+            assert not isinstance(app.screen, RunScreen) and app.controller.session is None
 
     asyncio.run(scenario())
 
@@ -103,7 +105,7 @@ def test_tui_ai_answer_uses_session_state():
             return "Plug in the 12 V adapter."
 
     async def scenario():
-        app = make_app("--mock-faults", "voltage:5")
+        app = make_app("voltage:5")
         app.assistant = FakeAssistant()
         async with app.run_test(size=(120, 40)) as pilot:
             await pilot.pause(0.2)
@@ -111,13 +113,13 @@ def test_tui_ai_answer_uses_session_state():
             await pilot.pause(0.2)
             t0 = time.monotonic()
             while time.monotonic() - t0 < 30:
-                cur = app.snapshot()["current"]
+                cur = app.controller.snapshot()["current"]
                 if cur["status"] == "fail":
                     break
                 if cur["status"] == "ready":
                     await pilot.press("enter")
                 await pilot.pause(0.1)
-            assert app.snapshot()["current"]["id"] == "power"
+            assert app.controller.snapshot()["current"]["id"] == "power"
             await pilot.press("a")
             await pilot.press("enter")  # empty question: explain the problem
             await pilot.pause(0.3)

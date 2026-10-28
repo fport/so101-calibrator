@@ -1,0 +1,4 @@
+The animations in so101/ are rendered from the SO-101 model of the SO-ARM100 project
+(https://github.com/TheRobotStudio/SO-ARM100), Copyright The Robot Studio, licensed under the
+Apache License, Version 2.0 (https://www.apache.org/licenses/LICENSE-2.0). Changes: rendered with
+MuJoCo into short clips, recoloured to highlight one joint at a time.

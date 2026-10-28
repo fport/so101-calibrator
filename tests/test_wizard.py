@@ -163,3 +163,18 @@ def test_snapshot_is_json_serializable(store):
     rig = MockRig.create()
     s = calibrate(store, rig, "follower")
     json.dumps(s.snapshot())
+
+
+def test_ranges_stopped_early_fails_without_breaking_snapshot(store):
+    """Regression: a zero-width recorded range made snapshot() divide by zero (TUI crash)."""
+    rig = MockRig.create()
+    s = drive(Session.calibrate(make_ctx(store, rig), Target("follower", "follower", port=rig.port_of("follower"))),
+              rig, until="ranges")
+    s.start()
+    s.poll()
+    s.stop()  # nothing moved: every recorded range is a single tick
+    assert s.state.status == "fail"
+    snap = s.snapshot()
+    assert all(j["norm"] is None for j in snap["arms"]["follower"]["joints"].values() if j["cal_min"] == j["cal_max"])
+    s.retry()
+    assert s.snapshot()["current"]["status"] == "ready"

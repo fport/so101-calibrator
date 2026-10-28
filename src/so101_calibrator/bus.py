@@ -83,7 +83,7 @@ class FeetechBus:
         try:
             import scservo_sdk as scs
         except ImportError as e:  # pragma: no cover - depends on optional extra
-            raise BusError("Real motors need the hardware extra: uv sync --extra hardware") from e
+            raise BusError("Real motors need Feetech's SDK: pip install feetech-servo-sdk") from e
         self._scs = scs
         self._ph = scs.PortHandler(self.port)
         # Same fix LeRobot applies: the PyPI SDK's packet timeout is too short for STS replies.
@@ -99,7 +99,10 @@ class FeetechBus:
 
     def close(self) -> None:
         if self._ph is not None:
-            self._ph.closePort()
+            try:
+                self._ph.closePort()
+            except Exception:  # the device may already be gone
+                pass
             self._ph = None
 
     def set_baudrate(self, baudrate: int) -> None:
@@ -107,9 +110,19 @@ class FeetechBus:
             raise BusError(f"Cannot set baudrate {baudrate} on {self.port}")
         self.baudrate = baudrate
 
+    def _txrx(self, fn, *args):
+        """One SDK transaction. A vanished port makes pyserial raise OSError/SerialException (or the SDK
+        trip over a closed handle); everything above this class only has to handle BusError."""
+        if self._ph is None:
+            raise BusError(f"{self.port} is not open")
+        try:
+            return fn(self._ph, *args)
+        except Exception as e:
+            raise BusError(f"{self.port}: {e}") from e
+
     def ping(self, motor_id: int) -> int | None:
         for _ in range(2):  # scans ping absent ids too: keep it quick
-            model, comm, _err = self._pk.ping(self._ph, motor_id)
+            model, comm, _err = self._txrx(self._pk.ping, motor_id)
             if comm == self._scs.COMM_SUCCESS:
                 return model
         return None
@@ -117,8 +130,9 @@ class FeetechBus:
     def read(self, register: str, motor_id: int) -> int:
         addr, size, sign = REGISTERS[register]
         fn = {1: self._pk.read1ByteTxRx, 2: self._pk.read2ByteTxRx}[size]
+        comm = None
         for _ in range(self.retries):
-            value, comm, _err = fn(self._ph, motor_id, addr)
+            value, comm, _err = self._txrx(fn, motor_id, addr)
             if comm == self._scs.COMM_SUCCESS:
                 return decode_sign_magnitude(value, sign) if sign is not None else value
         raise BusError(f"read {register} from motor {motor_id} failed: {self._pk.getTxRxResult(comm)}")
@@ -127,8 +141,9 @@ class FeetechBus:
         addr, size, sign = REGISTERS[register]
         raw = encode_sign_magnitude(value, sign) if sign is not None else value
         fn = {1: self._pk.write1ByteTxRx, 2: self._pk.write2ByteTxRx}[size]
+        comm = None
         for _ in range(self.retries):
-            comm, _err = fn(self._ph, motor_id, addr, raw)
+            comm, _err = self._txrx(fn, motor_id, addr, raw)
             if comm == self._scs.COMM_SUCCESS:
                 return
         raise BusError(f"write {register}={value} to motor {motor_id} failed: {self._pk.getTxRxResult(comm)}")
@@ -195,11 +210,33 @@ class Arm:
         return self._read_all("Present_Temperature")
 
     def set_torque(self, enabled: bool, joints=JOINTS) -> None:
+        """Like LeRobot: torque off also unlocks the EEPROM (so offsets/limits can be written), torque on
+        locks it again. Stops at the first error; use torque_off() when making things safe."""
         with self.lock:
             for j in joints:
                 self.bus.write("Torque_Enable", MOTOR_IDS[j], 1 if enabled else 0)
-                if not enabled:
-                    self.bus.write("Lock", MOTOR_IDS[j], 0)  # unlock EEPROM so offsets/limits can be written
+                self.bus.write("Lock", MOTOR_IDS[j], 1 if enabled else 0)
+
+    def torque_off(self) -> list[str]:
+        """Best effort: try to disable torque on every motor even if some fail. Returns the errors."""
+        errors = []
+        with self.lock:
+            if not self.connected:
+                return errors
+            for j in JOINTS:
+                try:
+                    self.bus.write("Torque_Enable", MOTOR_IDS[j], 0)
+                except Exception as e:  # keep going: the other motors must still be released
+                    errors.append(f"{j}: {e}")
+        return errors
+
+    def release(self) -> None:
+        """Torque off (best effort) and close the port. Never raises."""
+        self.torque_off()
+        try:
+            self.close()
+        except Exception:
+            pass
 
     def prepare_for_calibration(self) -> None:
         with self.lock:

@@ -108,6 +108,8 @@ class MockBus:
         self.baudrate = baudrate
 
     def _alive(self, motor_id: int) -> bool:
+        if self.connected and not self.present():  # USB unplugged while open: what FeetechBus reports
+            raise BusError(f"{self.port}: device disconnected")
         return (self.connected and self.baudrate == 1_000_000 and motor_id in self.regs
                 and motor_id not in self.arm.faults.missing_ids)
 
@@ -329,7 +331,7 @@ class MockActor:
         if step is None:
             return
         hand = self.hands.get(step.role)
-        if step.kind == "port" and step.live:
+        if step.kind == "port" and step.is_live(session):
             port = session.targets[step.role].port or self.rig.port_of(step.role)
             self._later(lambda: self.rig.ports.unplug(port), 0.6)
             self._later(lambda: self.rig.ports.replug(port), 1.4)

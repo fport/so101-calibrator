@@ -7,14 +7,14 @@ from pathlib import Path
 
 import pytest
 
-from so101_calibrator.cli import Env, build_parser
 from so101_calibrator.dashboard.server import make_server
+
+from .conftest import mock_env
 
 
 @pytest.fixture
 def dashboard():
-    args = build_parser().parse_args(["--mock", "--mock-speed", "20", "dashboard"])
-    server, app = make_server(Env(args), port=0)
+    server, app = make_server(mock_env(), port=0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}"
     app.shutdown()
@@ -60,8 +60,8 @@ def test_calibration_through_api(dashboard):
             fills = [r["fill"] for r in cur["progress"].get("recorded", {}).values()]
             if fills and min(fills) >= 0.95:
                 call(dashboard, "/api/session/action", {"action": "stop"})
-        elif cur["can"]["next"]:
-            call(dashboard, "/api/session/action", {"action": "next"})
+        elif cur["can"]["accept"]:
+            call(dashboard, "/api/session/action", {"action": "accept"})
         elif cur["status"] == "fail":
             pytest.fail(json.dumps(s["steps"]))
         time.sleep(0.05)

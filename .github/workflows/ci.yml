@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:  # reused by the release workflow
 
 jobs:
   test:
@@ -23,17 +24,36 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: ${{ matrix.python }}
-      - run: uv sync --extra hardware --extra ai
+      - run: uv sync --extra ai
       - run: uv run ruff check .
       - run: uv run pytest -q
-      - name: Mock end-to-end (CLI)
-        shell: bash
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv build
+      - run: uvx twine check --strict dist/*
+      - name: Install the wheel in a clean environment and run the mock end to end
         env:
           SO101CAL_HOME: ${{ runner.temp }}/store
           HF_LEROBOT_CALIBRATION: ${{ runner.temp }}/lerobot
         run: |
-          uv run so101-cal --mock --mock-speed 4 calibrate leader --yes
-          uv run so101-cal --mock --mock-speed 4 calibrate follower --yes
-          uv run so101-cal --mock verify follower --yes
-          uv run so101-cal --mock teleop-test --seconds 3 --yes
-          uv run so101-cal history
+          uv venv --python 3.12 ${{ runner.temp }}/venv
+          source ${{ runner.temp }}/venv/bin/activate
+          uv pip install dist/*.whl
+          cd ${{ runner.temp }}
+          so101-cal --version
+          so101-cal --mock --mock-speed 4 calibrate leader --yes
+          so101-cal --mock --mock-speed 4 calibrate follower --yes
+          so101-cal --mock verify follower --yes
+          so101-cal --mock teleop-test --seconds 3 --yes
+          python -m so101_calibrator history
+          python -c "from so101_calibrator import assets; assert len(assets.frames('ranges')) > 10"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/

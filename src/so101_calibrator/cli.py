@@ -4,187 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import signal
 import sys
-import threading
-import time
 
 from . import __version__, render
 from . import checks as K
-from .ports import diff_ports, list_ports
+from .bus import BusError
+from .console import BOLD, DIM, RESET, color, print_checks, run_session
+from .env import Env
+from .ports import diff_ports
 from .store import Store, StoreError
-from .wizard import Context, Session, Target
-
-TTY = sys.stdout.isatty() and not os.environ.get("NO_COLOR")
-RESET, BOLD, DIM = ("\033[0m", "\033[1m", "\033[2m") if TTY else ("", "", "")
-COLORS = {"pass": "\033[32m", "warn": "\033[33m", "fail": "\033[31m", "info": "\033[36m"}
-ICONS = {"pass": "✔", "warn": "!", "fail": "✘", "skipped": "-", "pending": " ", "ready": "›", "running": "…"}
-
-
-def c(status: str, text: str) -> str:
-    if not TTY:
-        return text
-    return f"{COLORS.get(status, '')}{text}{RESET}"
-
-
-# --- environment (real or mock) -------------------------------------------------------------------
-class Env:
-    def __init__(self, args):
-        self.store = Store(args.store)
-        self.mock = args.mock
-        self.rig = self.actor = None
-        if self.mock:
-            from .mock import MockActor, load_rig
-
-            self.rig_path = self.store.root / ".mock-rig.json"
-            # Simulated calibrations must never land in the real LeRobot cache.
-            self.store.lerobot_root = self.store.root / "mock-lerobot"
-            self.rig = load_rig(self.rig_path, args.mock_faults)
-            self.actor = MockActor(self.rig, speed=args.mock_speed)
-
-    def open_bus(self, port: str):
-        if self.mock:
-            return self.rig.bus(port)
-        from .bus import FeetechBus
-
-        return FeetechBus(port)
-
-    def list_ports(self) -> dict[str, str]:
-        return self.rig.ports.list() if self.mock else list_ports()
-
-    def context(self, args, **kw) -> Context:
-        return Context(store=self.store, open_bus=self.open_bus, list_ports=self.list_ports, actor=self.actor,
-                       supply=getattr(args, "supply", None), **kw)
-
-    def save(self) -> None:
-        if self.mock:
-            from .mock import save_rig
-
-            save_rig(self.rig, self.rig_path)
-
-
-def _remembered_port(store: Store, arm_id: str) -> str | None:
-    info = store.arm(arm_id)
-    return info.get("port") if info else None
-
-
-# --- interactive driver for a wizard session ------------------------------------------------------
-class Keys:
-    """Reads whole lines from stdin on a thread so live steps can be stopped with ENTER."""
-
-    def __init__(self):
-        self.lines: list[str] = []
-        self.event = threading.Event()
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _run(self):
-        for line in sys.stdin:
-            self.lines.append(line.strip().lower())
-            self.event.set()
-        self.lines.append("eof")
-        self.event.set()
-
-    def get(self, timeout: float | None = None) -> str | None:
-        if not self.lines and not self.event.wait(timeout):
-            return None
-        line = self.lines.pop(0)
-        if not self.lines:
-            self.event.clear()
-        return line
-
-
-def run_session(session: Session, yes: bool, force: bool, actor=None) -> int:
-    keys = None if yes else Keys()
-    total = len(session.steps)
-    shown = None
-    try:
-        while not session.finished:
-            st, state = session.step, session.state
-            if shown != st.id:
-                shown = st.id
-                print(f"\n{BOLD}[{session.current + 1}/{total}] {st.label}{RESET}")
-                print(f"  {st.instructions(session)}")
-            if state.status == "ready":
-                if not yes:
-                    prompt = "Press ENTER to start" if not st.live else "Press ENTER to start (ENTER again to stop)"
-                    print(f"  {DIM}{prompt}, 'a' to abort.{RESET}", flush=True)
-                    if keys.get() in ("a", "eof"):
-                        session.abort()
-                        break
-                session.start()
-                if session.step is st and session.state.status == "running":
-                    _live(session, st, keys, yes, actor)
-            if session.step is not st or session.finished:
-                _print_checks(session.results.get(st.id, []))
-                shown = None if session.step is not st else shown
-                continue
-            status = session.state.status
-            _print_checks(session.results.get(st.id, []))
-            if status == "warn":
-                if yes:
-                    session.next()
-                    continue
-                print(f"  {DIM}ENTER: continue anyway · r: retry · a: abort{RESET}", flush=True)
-                key = keys.get()
-                if key in ("a", "eof"):
-                    session.abort()
-                elif key == "r":
-                    session.retry()
-                    shown = None
-                else:
-                    session.next()
-            elif status == "fail":
-                if yes:
-                    if force:
-                        session.next(force=True)
-                        continue
-                    session.abort()
-                    break
-                print(f"  {DIM}ENTER: retry · f: accept anyway (not recommended) · a: abort{RESET}", flush=True)
-                key = keys.get()
-                if key in ("a", "eof"):
-                    session.abort()
-                elif key == "f":
-                    session.next(force=True)
-                else:
-                    session.retry()
-                    shown = None
-    except KeyboardInterrupt:
-        print("\nInterrupted.")
-        session.abort()
-    finally:
-        session.close()
-    result = session.result()
-    print(f"\n{BOLD}Result: {c(result if result != 'aborted' else 'fail', result.upper())}{RESET}")
-    return 0 if result in ("pass", "warn") else 1
-
-
-def _live(session: Session, st, keys: Keys | None, yes: bool, actor) -> None:
-    lines = 0
-    t_end = time.monotonic() + 600
-    while session.step is st and session.state.status == "running":
-        session.poll()
-        out = render.live_lines(session.snapshot())
-        if sys.stdout.isatty():
-            if lines:
-                sys.stdout.write(f"\033[{lines}F")
-            sys.stdout.write("\n".join(f"\033[2K{line}" for line in out) + "\n")
-            sys.stdout.flush()
-            lines = len(out)
-        if keys and keys.get(timeout=0.04) is not None:
-            session.stop()
-        elif yes:
-            time.sleep(0.03)
-            mock_done = actor is not None and actor.idle() and st.kind in ("ranges", "direction")
-            if mock_done or time.monotonic() > t_end:
-                session.stop()
-
-
-def _print_checks(checks: list[K.Check]) -> None:
-    for chk in checks:
-        print(f"  {c(chk.status, ICONS[chk.status])} {chk.message}")
-        if chk.fix and chk.status != K.PASS:
-            print(f"      {DIM}→ {chk.fix}{RESET}")
+from .wizard import Session
 
 
 # --- commands --------------------------------------------------------------------------------------
@@ -209,7 +39,7 @@ def cmd_find_port(args, env: Env) -> int:
         input("Unplug the USB cable of the board you want to identify and press ENTER...")
     removed, _ = diff_ports(before, env.list_ports())
     for chk in K.check_port_found(removed, []):
-        _print_checks([chk])
+        print_checks([chk])
     if len(removed) == 1:
         print(f"\nThe port is {BOLD}{removed[0]}{RESET} (USB serial {before[removed[0]] or 'unknown'}). "
               "Plug the cable back in.")
@@ -217,18 +47,9 @@ def cmd_find_port(args, env: Env) -> int:
     return 1
 
 
-def _target(args, env: Env, role: str, arm_id: str | None = None, port: str | None = None) -> Target:
-    arm_id = arm_id or role
-    if not port:
-        port = _remembered_port(env.store, arm_id)
-        if port and port not in env.list_ports():
-            port = None  # remembered port is gone (other USB socket?): fall back to discovery
-    return Target(role=role, arm_id=arm_id, port=port, note=getattr(args, "note", "") or "")
-
-
 def cmd_calibrate(args, env: Env) -> int:
-    target = _target(args, env, args.role, args.id, args.port)
-    ctx = env.context(args, export=not args.no_export, export_dir=args.calibration_dir,
+    target = env.target(args.role, args.id, args.port, args.note)
+    ctx = env.context(supply=args.supply, export=not args.no_export, export_dir=args.calibration_dir,
                       legacy_export=args.legacy_export)
     print(f"{BOLD}Calibrating {args.role} '{target.arm_id}'{RESET}" + (f" on {target.port}" if target.port else ""))
     code = run_session(Session.calibrate(ctx, target), args.yes, args.force, env.actor)
@@ -237,16 +58,16 @@ def cmd_calibrate(args, env: Env) -> int:
 
 
 def cmd_verify(args, env: Env) -> int:
-    target = _target(args, env, args.role, args.id, args.port)
-    code = run_session(Session.verify(env.context(args), target), args.yes, args.force, env.actor)
+    target = env.target(args.role, args.id, args.port)
+    code = run_session(Session.verify(env.context(supply=args.supply), target), args.yes, args.force, env.actor)
     env.save()
     return code
 
 
 def cmd_teleop_test(args, env: Env) -> int:
-    leader = _target(args, env, "leader", args.leader_id, args.leader_port)
-    follower = _target(args, env, "follower", args.follower_id, args.follower_port)
-    ctx = env.context(args, teleop_seconds=args.seconds)
+    leader = env.target("leader", args.leader_id, args.leader_port)
+    follower = env.target("follower", args.follower_id, args.follower_port)
+    ctx = env.context(supply=args.supply, teleop_seconds=args.seconds)
     code = run_session(Session.teleop(ctx, leader, follower), args.yes, args.force, env.actor)
     env.save()
     return code
@@ -262,7 +83,7 @@ def cmd_history(args, env: Env) -> int:
               + (f", USB {info['usb_serial']}" if info.get("usb_serial") else "") + ")")
         for rec in env.store.versions(info["arm_id"]):
             s = rec.summary()
-            mark = c("pass", "* active") if rec.version == info.get("active") else "        "
+            mark = color("pass", "* active") if rec.version == info.get("active") else "        "
             counts = s["checks"]
             checks = f"{counts['pass']}✔ {counts['warn']}! {counts['fail']}✘" if sum(counts.values()) else "no checks"
             print(f"  v{rec.version:<3} {mark} {s['created']}  {s['source']:<8} {checks:<12} {s.get('note', '')}")
@@ -283,7 +104,7 @@ def cmd_show(args, env: Env) -> int:
     bad = [K.Check(**ch) for ch in rec.data.get("checks", []) if ch["status"] != "pass"]
     if bad:
         print("\nChecks that did not pass when this version was made:")
-        _print_checks(bad)
+        print_checks(bad)
     return 0
 
 
@@ -325,22 +146,33 @@ def cmd_note(args, env: Env) -> int:
 
 
 def cmd_write(args, env: Env) -> int:
+    from . import profiles as P
     from .bus import Arm
 
     rec = env.store.get(args.id, args.version)
-    port = args.port or _remembered_port(env.store, args.id)
+    role = rec.data["role"]
+    port = args.port or env.remembered_port(args.id)
     if not port:
-        print("No port known for this arm; pass --port.")
+        print(f"'{args.id}' is not plugged in (or its port is unknown): pass --port.", file=sys.stderr)
         return 1
     arm = Arm(env.open_bus(port))
-    arm.connect()
     try:
+        arm.connect()
+        # Writing a follower calibration into the leader (or the other way round) would go unnoticed by
+        # the read-back check, so first make sure the arm on this port is the one we think it is.
+        checks = K.check_motors(arm.scan(), None)
+        if K.worst(checks) != K.FAIL:
+            checks += K.check_power(arm.voltages(), arm.temperatures(), P.profile(role))
+        if K.worst(checks) == K.FAIL and not args.force:
+            print_checks([c for c in checks if c.status != K.PASS])
+            print(f"Not writing: is {port} really the {role} '{args.id}'? (--force to write anyway)", file=sys.stderr)
+            return 1
         arm.set_torque(False)
         arm.write_calibration(rec.calibration)
         checks = K.check_motor_matches(rec.calibration, arm.read_calibration())
     finally:
-        arm.close()
-    _print_checks(checks)
+        arm.release()
+    print_checks(checks)
     env.save()
     return 0 if K.worst(checks) != K.FAIL else 1
 
@@ -495,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("id")
     sp.add_argument("--version", type=int)
     sp.add_argument("--port")
+    sp.add_argument("--force", action="store_true", help="write even if the arm on the port does not look right")
     sp.set_defaults(func=cmd_write)
 
     sp = sub.add_parser("where", help="print the LeRobot cache path for an arm")
@@ -518,14 +351,24 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _exit_on_signal(signum, _frame):
+    # Closing the terminal (SIGHUP) or `kill` (SIGTERM) must still run the `finally` blocks that turn
+    # follower torque off, so turn the signal into an ordinary exit.
+    raise SystemExit(128 + signum)
+
+
 def main(argv: list[str] | None = None) -> int:
     if hasattr(sys.stdout, "reconfigure"):  # legacy Windows consoles cannot print the check icons
         sys.stdout.reconfigure(errors="replace")
-    args = build_parser().parse_args(argv)
-    env = Env(args)
+    for name in ("SIGTERM", "SIGHUP"):
+        if hasattr(signal, name):
+            signal.signal(getattr(signal, name), _exit_on_signal)
+    parser = build_parser()
+    args = parser.parse_args(argv)
     try:
+        env = Env(Store(args.store), mock=args.mock, mock_faults=args.mock_faults, mock_speed=args.mock_speed)
         return args.func(args, env) or 0
-    except StoreError as e:
+    except (StoreError, BusError, OSError, ValueError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

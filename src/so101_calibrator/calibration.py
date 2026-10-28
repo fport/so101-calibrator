@@ -79,8 +79,13 @@ def validate_shape(cal: Calibration) -> list[str]:
 
 
 def normalize(name: str, raw: int, m: MotorCalibration) -> float:
-    """LeRobot's default normalization: -100..100 for body joints, 0..100 for the gripper."""
+    """LeRobot's default normalization: -100..100 for body joints, 0..100 for the gripper.
+
+    Raises ValueError for an empty range (min == max), as LeRobot does.
+    """
     lo, hi = m.range_min, m.range_max
+    if hi <= lo:
+        raise ValueError(f"{name}: empty range {lo}..{hi}")
     bounded = min(hi, max(lo, raw))
     if name == "gripper":
         v = (bounded - lo) / (hi - lo) * 100

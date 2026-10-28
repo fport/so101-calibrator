@@ -22,6 +22,14 @@ from .profiles import PROFILES
 ARM_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$")
 
 
+def tilde(path: Path) -> str:
+    """`path` with the home directory shown as ~ (for display)."""
+    try:
+        return str(Path("~") / path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
 def default_store() -> Path:
     return Path(os.environ.get("SO101CAL_HOME", Path.home() / ".so101-calibrator")).expanduser()
 
@@ -50,6 +58,24 @@ def lerobot_calibration_path(role: str, arm_id: str, legacy: bool = False, root:
 
 class StoreError(RuntimeError):
     pass
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        data = json.loads(path.read_text())
+    except json.JSONDecodeError as e:
+        raise StoreError(f"{path} is corrupt ({e}); restore it from a backup or delete it") from e
+    if not isinstance(data, dict):
+        raise StoreError(f"{path} is not a calibration store file")
+    return data
+
+
+def _write_json(path: Path, data: dict) -> None:
+    """Write via a temporary file + rename, so a crash never leaves a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n")
+    os.replace(tmp, path)
 
 
 @dataclass
@@ -88,19 +114,17 @@ class Store:
 
     def arm(self, arm_id: str) -> dict | None:
         p = self._arm_dir(arm_id) / "arm.json"
-        return json.loads(p.read_text()) if p.exists() else None
+        return _read_json(p) if p.exists() else None
 
     def _write_arm(self, arm_id: str, info: dict) -> None:
-        d = self._arm_dir(arm_id)
-        d.mkdir(parents=True, exist_ok=True)
-        (d / "arm.json").write_text(json.dumps(info, indent=2) + "\n")
+        _write_json(self._arm_dir(arm_id) / "arm.json", info)
 
     def arms(self) -> list[dict]:
         if not self.root.exists():
             return []
         out = []
         for p in sorted(self.root.glob("*/arm.json")):
-            info = json.loads(p.read_text())
+            info = _read_json(p)
             info["versions"] = len(list(p.parent.glob("v*.json")))
             out.append(info)
         return out
@@ -108,7 +132,7 @@ class Store:
     # --- versions -----------------------------------------------------------------------------------
     def versions(self, arm_id: str) -> list[Record]:
         d = self._arm_dir(arm_id)
-        return [Record(json.loads(p.read_text())) for p in sorted(d.glob("v*.json"))]
+        return [Record(_read_json(p)) for p in sorted(d.glob("v*.json"))]
 
     def get(self, arm_id: str, version: int | None = None) -> Record:
         info = self.arm(arm_id)
@@ -120,7 +144,7 @@ class Store:
         p = self._arm_dir(arm_id) / f"v{v:04d}.json"
         if not p.exists():
             raise StoreError(f"'{arm_id}' has no version {v}")
-        return Record(json.loads(p.read_text()))
+        return Record(_read_json(p))
 
     def active(self, arm_id: str) -> Record | None:
         try:
@@ -154,9 +178,7 @@ class Store:
             "directions": directions or {},
             "calibration": C.to_json_dict(cal),
         }
-        d = self._arm_dir(arm_id)
-        d.mkdir(parents=True, exist_ok=True)
-        (d / f"v{version:04d}.json").write_text(json.dumps(record, indent=2) + "\n")
+        _write_json(self._arm_dir(arm_id) / f"v{version:04d}.json", record)
         if port:
             info["port"] = port
         if usb_serial:
@@ -176,7 +198,7 @@ class Store:
     def set_note(self, arm_id: str, version: int, note: str) -> Record:
         rec = self.get(arm_id, version)
         rec.data["note"] = note
-        (self._arm_dir(arm_id) / f"v{version:04d}.json").write_text(json.dumps(rec.data, indent=2) + "\n")
+        _write_json(self._arm_dir(arm_id) / f"v{version:04d}.json", rec.data)
         return rec
 
     def diff(self, arm_id: str, a: int, b: int | None = None) -> list[dict]:
@@ -188,8 +210,8 @@ class Store:
         for info in self.arms():
             if info["role"] != role or info["arm_id"] == exclude_arm or not info.get("active"):
                 continue
-            rec = self.get(info["arm_id"])
-            if rec.data.get("directions") and (best is None or rec.data["created"] > best[0]):
+            rec = self.active(info["arm_id"])
+            if rec and rec.data.get("directions") and (best is None or rec.data["created"] > best[0]):
                 best = (rec.data["created"], info["arm_id"], rec.data["directions"])
         return (best[1], best[2]) if best else None
 
@@ -219,5 +241,7 @@ class Store:
             if not same:
                 shutil.copy2(target, target.with_name(f"{target.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}"))
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content)
+        tmp = target.with_name(f".{target.name}.tmp")
+        tmp.write_text(content)
+        os.replace(tmp, target)
         return target

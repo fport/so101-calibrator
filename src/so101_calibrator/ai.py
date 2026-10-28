@@ -2,7 +2,7 @@
 
 Off unless configured. A spec is `provider[:model]`:
 
-    claude[:model]        Anthropic API (pip extra `ai`), key from ANTHROPIC_API_KEY or `ant auth login`
+    claude[:model]        Anthropic API (extra `ai`), key from ANTHROPIC_API_KEY or `ant auth login`
     ollama[:model]        local Ollama ($OLLAMA_HOST, default http://localhost:11434)
     openai:model          any OpenAI-compatible server: $SO101CAL_AI_URL (e.g. LM Studio
                           http://localhost:1234/v1, llama.cpp, vLLM) or api.openai.com with $OPENAI_API_KEY
@@ -136,7 +136,7 @@ class Assistant:
         try:
             import anthropic
         except ImportError as e:
-            raise AIError("Claude needs the Anthropic SDK: uv sync --extra ai (or pip install anthropic)") from e
+            raise AIError('Claude needs the Anthropic SDK: pip install "so101-calibrator[ai]"') from e
         try:
             client = anthropic.Anthropic(timeout=self.timeout)
             with client.beta.messages.stream(
