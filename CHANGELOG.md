@@ -6,7 +6,8 @@
   start check, so a leader wrist turned ~200 degrees away from the follower's made the follower spin its
   wrist at full torque, which cracked a follower's wrist housing. Now:
   - wrist_roll must match before torque goes on (only the gripper is left out);
-  - the follower starts slowly (ramping up over ~2 s) and never moves faster than ~90 deg/s;
+  - the follower starts slowly (~9 deg/s, ramping up over 2 s) and never moves faster than ~90 deg/s,
+    measured per second so a faster control loop (30, 60 Hz) does not make it faster;
   - torque is limited during the test (35-70 % per joint) and restored afterwards.
 
 - The teleop test no longer stops at eight check screens waiting for Enter: checks that need nothing from

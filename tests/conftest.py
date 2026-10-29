@@ -18,7 +18,21 @@ def store(tmp_path):
     return Store(tmp_path / "store")
 
 
+class FakeClock:
+    """Time that only moves when a test says so (the teleop test limits speed per second)."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 def make_ctx(store, rig, **kw):
+    kw.setdefault("clock", FakeClock())
     return Context(store=store, open_bus=rig.bus, list_ports=rig.ports.list, **kw)
 
 
@@ -58,6 +72,7 @@ def drive(session: Session, rig: MockRig, *, accept_warnings=True, until=None):
                     for k in range(120):  # unfold every joint a little, towards the middle (past the slow start)
                         for j, v in start.items():
                             rig.leader.set_pose(j, v + (0.2 if v <= 0 else -0.2) * (k / 120))
+                        session.ctx.clock.advance(0.04)  # a 25 Hz loop
                         session.poll()
                     session.stop()
         elif state.status == "warn" and accept_warnings:

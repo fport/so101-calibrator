@@ -1,3 +1,5 @@
+import pytest
+
 from so101_calibrator import calibration as C
 from so101_calibrator.mock import MockActor, MockHand, MockRig
 from so101_calibrator.profiles import HALF_TURN, JOINTS
@@ -241,7 +243,8 @@ def test_teleop_refuses_wrists_turned_apart_and_never_torques(store):
     assert not any(r == "Torque_Enable" and v for r, _, v in bus.writes)
 
 
-def test_teleop_starts_slowly_with_limited_torque_and_restores_it(store):
+@pytest.mark.parametrize("hz", [25, 30, 60])
+def test_teleop_follower_speed_is_capped_per_second_at_any_loop_rate(store, hz):
     from so101_calibrator import profiles as P
 
     rig = MockRig.create()
@@ -255,15 +258,21 @@ def test_teleop_starts_slowly_with_limited_torque_and_restores_it(store):
     bus = rig.bus(rig.FOLLOWER_PORT)
     s.start()
     assert s.state.status == "running"
-    limited = [(i, v) for r, i, v in bus.writes if r == "Torque_Limit"]
-    assert limited and all(v <= 700 for _, v in limited)  # set before torque went on
+    limited = [v for r, _, v in bus.writes if r == "Torque_Limit"]
+    assert limited and all(v <= 700 for v in limited)  # reduced torque, set before torque went on
     first_torque = next(n for n, (r, _, v) in enumerate(bus.writes) if r == "Torque_Enable" and v)
     assert max(n for n, (r, _, _) in enumerate(bus.writes) if r == "Torque_Limit") < first_torque
-    before = {i: bus.regs[i]["Goal_Position"] for i in range(1, 7)}
-    rig.leader.set_pose("elbow_flex", 0.0)  # the leader jumps far away
-    s.poll()
-    moved = max(abs(bus.regs[i]["Goal_Position"] - before[i]) for i in range(1, 7))
-    assert 0 < moved <= P.TELEOP_START_STEP + 1  # the follower only creeps at first
+    rig.leader.set_pose("elbow_flex", -0.9)  # the leader swings far away at once
+    goals = []
+    for _ in range(3 * hz):  # three seconds of control loop
+        s.ctx.clock.advance(1 / hz)
+        s.poll()
+        goals.append(bus.regs[3]["Goal_Position"])
+    first = abs(goals[hz // 2] - goals[0])  # first half second: barely moving (~10 degrees)
+    ramp = (P.TELEOP_MAX_SPEED - P.TELEOP_START_SPEED) / P.TELEOP_RAMP_SECONDS
+    assert first <= P.TELEOP_START_SPEED * 0.5 + ramp * 0.5**2 / 2 + hz // 2  # + rounding per cycle
+    fastest = max(abs(b - a) for a, b in zip(goals, goals[1:], strict=False)) * hz  # ticks per second
+    assert fastest <= P.TELEOP_MAX_SPEED + hz  # same cap at 25, 30 or 60 Hz (+1 tick rounding per cycle)
     s.abort()
     assert bus.regs[3]["Torque_Limit"] == 1000 and bus.regs[6]["Torque_Limit"] == 500
     assert not bus.regs[3]["Torque_Enable"]

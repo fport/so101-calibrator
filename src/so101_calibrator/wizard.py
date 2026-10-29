@@ -49,6 +49,7 @@ class Context:
     export_dir: str | None = None  # custom calibration_dir instead of the LeRobot cache
     legacy_export: bool = False
     teleop_seconds: float = 15.0
+    clock: Callable[[], float] = time.monotonic  # tests drive time themselves
 
 
 @dataclass
@@ -479,10 +480,11 @@ class TeleopStep(Step):
 
     def reset(self):
         self.t0: float | None = None
+        self.last_tick = 0.0
         self.start_checks: list[K.Check] = []
         self.err_sum: dict[str, float] = {}
         self.samples = self.cycles = 0
-        self.goal: dict[str, int] = {}
+        self.goal: dict[str, float] = {}
         self.last_target: dict[str, int] | None = None
 
     def instructions(self, s):
@@ -512,10 +514,10 @@ class TeleopStep(Step):
         self.start_checks = checks
         follower.configure_follower()
         follower.limit_torque(P.TELEOP_TORQUE_LIMIT)
-        self.goal = follower.positions()
+        self.goal = {j: float(v) for j, v in follower.positions().items()}
         follower.write_goals(self.goal)
         follower.set_torque(True)  # a failure part-way is undone by abort(), which every exit path calls
-        self.t0 = time.monotonic()
+        self.t0 = self.last_tick = s.ctx.clock()
         self.err_sum = {j: 0.0 for j in JOINTS if j not in FULL_TURN_JOINTS}
         return None
 
@@ -526,10 +528,12 @@ class TeleopStep(Step):
         lcal, fcal = s.draft.stored["leader"], s.draft.stored["follower"]
         target = {j: C.unnormalize(j, C.normalize(j, lpos[j], lcal[j]), fcal[j]) for j in JOINTS}
         self.cycles += 1
-        # slow at first, then capped: the follower creeps towards the leader's pose
-        ramp = min(1.0, self.cycles / P.TELEOP_RAMP_CYCLES)
-        step = round(P.TELEOP_START_STEP + (P.TELEOP_MAX_STEP - P.TELEOP_START_STEP) * ramp)
-        if self.last_target and self.cycles > P.TELEOP_RAMP_CYCLES:  # let the follower catch up first
+        # slow at first, then capped, in ticks per second whatever the loop rate
+        now = s.ctx.clock()
+        dt, self.last_tick = min(P.TELEOP_MAX_DT, max(0.0, now - self.last_tick)), now
+        ramp = min(1.0, (now - self.t0) / P.TELEOP_RAMP_SECONDS)
+        step = (P.TELEOP_START_SPEED + (P.TELEOP_MAX_SPEED - P.TELEOP_START_SPEED) * ramp) * dt
+        if self.last_target and now - self.t0 > P.TELEOP_RAMP_SECONDS:  # let the follower catch up first
             # tracking error against what the leader asked for one cycle ago (the follower lags a cycle)
             for j in self.err_sum:
                 self.err_sum[j] += abs(C.normalize(j, fpos[j], fcal[j]) - C.normalize(j, self.last_target[j], fcal[j]))
@@ -539,7 +543,7 @@ class TeleopStep(Step):
         self.last_target = target
 
     def done(self, s):
-        return self.t0 is not None and time.monotonic() - self.t0 >= s.ctx.teleop_seconds
+        return self.t0 is not None and s.ctx.clock() - self.t0 >= s.ctx.teleop_seconds
 
     def end(self, s):
         self.abort(s)
@@ -559,7 +563,7 @@ class TeleopStep(Step):
     def progress(self, s):
         if self.t0 is None:
             return {}
-        return {"elapsed": round(time.monotonic() - self.t0, 1), "seconds": s.ctx.teleop_seconds,
+        return {"elapsed": round(s.ctx.clock() - self.t0, 1), "seconds": s.ctx.teleop_seconds,
                 "samples": self.samples}
 
 

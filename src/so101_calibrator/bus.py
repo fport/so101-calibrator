@@ -307,4 +307,4 @@ class Arm:
     def write_goals(self, goals: dict[str, int]) -> None:
         with self.lock:
             for j, g in goals.items():
-                self.bus.write("Goal_Position", MOTOR_IDS[j], int(g))
+                self.bus.write("Goal_Position", MOTOR_IDS[j], round(g))
