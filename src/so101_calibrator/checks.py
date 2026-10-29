@@ -234,11 +234,14 @@ def check_teleop_start(leader: dict[str, float], follower: dict[str, float]) -> 
     from the opposite end of its range: the same pose, mirrored values. That is the only reliable way to spot
     one without asking a person to move a joint "up" or "left".
     """
-    # the gripper is left out: a trigger and a gripper rest differently, and the follower's gripper simply
-    # follows the trigger once torque is on (harmless, unlike a swinging arm)
+    # The gripper is left out: a trigger and a gripper rest differently, and the follower's gripper simply
+    # follows the trigger once torque is on. wrist_roll is NOT left out: the follower turns its wrist the
+    # long way round to the leader's value (it is not wrapped), and a wrist turned ~200 degrees with torque
+    # on breaks the wrist housing.
     far = {j: (leader[j], follower[j]) for j in JOINTS
-           if j not in FULL_TURN_JOINTS and j != "gripper" and abs(leader[j] - follower[j]) > P.TELEOP_START_MAX_DIFF}
-    mirrored = [j for j, (lv, fv) in far.items() if lv * fv < 0 and min(abs(lv), abs(fv)) > P.TELEOP_MIRRORED_MIN]
+           if j != "gripper" and abs(leader[j] - follower[j]) > P.TELEOP_START_MAX_DIFF}
+    mirrored = [j for j, (lv, fv) in far.items()
+                if j not in FULL_TURN_JOINTS and lv * fv < 0 and min(abs(lv), abs(fv)) > P.TELEOP_MIRRORED_MIN]
     checks = []
     for j in mirrored:
         lv, fv = far.pop(j)
@@ -250,8 +253,9 @@ def check_teleop_start(leader: dict[str, float], follower: dict[str, float]) -> 
     if far:
         desc = ", ".join(f"{j} ({lv - fv:+.0f})" for j, (lv, fv) in far.items())
         checks.append(Check("teleop.aligned", FAIL, f"Leader and follower poses differ: {desc}.",
-                            "Fold both arms into the rest pose before starting: the follower jumps to the "
-                            "leader's pose as soon as torque is on.", args={"joints": desc}))
+                            "Put the leader in the follower's pose (both folded, wrists and grippers turned the "
+                            "same way) and retry: once torque is on the follower moves to the leader's pose.",
+                            args={"joints": desc}))
     return checks or [_ok("teleop.aligned", "Leader and follower start in the same pose.")]
 
 

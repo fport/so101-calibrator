@@ -47,14 +47,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "mounted the other way round on one arm: re-assemble it like on the other arm. Teleoperation would drive "
         "this joint backwards.",
         "check.teleop.aligned": "Leader and follower poses differ: {joints}.",
-        "check.teleop.aligned.fix": "Fold both arms into the rest pose before starting: the follower jumps to the "
-        "leader's pose as soon as torque is on.",
+        "check.teleop.aligned.fix": "Put the leader in the follower's pose (both folded, wrists and grippers turned "
+        "the same way) and retry: once torque is on the follower moves to the leader's pose.",
         "check.save.forced": "Saved as {arm} v{version} (active), with accepted failures: {names}.",
         "check.save.forced.fix": "Fine if you meant it; the teleop test shows whether the arm works.",
         "sub.save": "Written to the motors and exported for LeRobot.",
         "sub.match": "",
         "sub.pose": "Each joint should read about 2047.",
-        "sub.teleop": "Lying on their stops. Then the follower mirrors the leader; keep a hand near it.",
+        "sub.teleop": "Folded, wrists turned the same way. The follower starts slowly; keep a hand near it.",
         "key.start": "start", "key.stop": "done", "key.accept": "continue", "key.retry": "retry",
         "key.force": "accept anyway", "key.abort": "cancel", "key.abort_again": "press again to cancel",
         "key.joints": "joints", "key.details": "details", "key.ask": "assistant", "key.done": "done",
@@ -107,14 +107,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "check.teleop.mirrored.fix": "İki kol gerçekten aynı şekilde katlıysa {joint} motoru (ya da horn'u) bir kolda "
         "ters takılı: diğer koldaki gibi yeniden monte et. Teleop bu eklemi ters yöne sürer.",
         "check.teleop.aligned": "Leader ve follower farklı duruşta: {joints}.",
-        "check.teleop.aligned.fix": "Başlamadan iki kolu da dinlenme duruşuna katla: tork açılınca follower hemen "
-        "leader'ın duruşuna gider.",
+        "check.teleop.aligned.fix": "Leader'ı follower'ın duruşuna getir (ikisi de katlı, bilekleri ve gripper'ları "
+        "aynı yöne dönük) ve tekrar dene: tork açılınca follower leader'ın duruşuna gider.",
         "check.save.forced": "{arm} v{version} olarak kaydedildi ve aktif; kabul edilen hatalar: {names}.",
         "check.save.forced.fix": "Bilerek kabul ettiysen sorun yok; kolun çalışıp çalışmadığını teleop testi gösterir.",
         "sub.save": "Motorlara yazılır ve LeRobot için dışa aktarılır.",
         "sub.match": "",
         "sub.pose": "Her eklem yaklaşık 2047 okumalı.",
-        "sub.teleop": "Dayanaklarına yaslı. Sonra follower leader'ı taklit eder; elin yakında olsun.",
+        "sub.teleop": "Katlı, bilekleri aynı yöne dönük. Follower yavaş başlar; elin yakında olsun.",
         "key.start": "başla", "key.stop": "bitti", "key.accept": "devam", "key.retry": "tekrar",
         "key.force": "yine de kabul", "key.abort": "iptal", "key.abort_again": "iptal için tekrar bas",
         "key.joints": "eklemler", "key.details": "detay", "key.ask": "asistan", "key.done": "bitti",

@@ -94,5 +94,14 @@ POSE_TOL_PASS = 120  # verify: middle pose re-found within this many ticks (~10 
 POSE_TOL_WARN = 250
 TELEOP_START_MAX_DIFF = 20.0  # normalized units; leader and follower must start roughly aligned
 TELEOP_MIRRORED_MIN = 40.0  # both this far from the middle, on opposite sides: a reversed motor
+# Teleop test safety. The follower never moves faster than TELEOP_MAX_STEP ticks per control cycle (~90 deg/s
+# at 25 Hz), starts slower still (TELEOP_START_STEP, ramping up over TELEOP_RAMP_CYCLES), and runs with
+# reduced torque, so a pose that was misjudged, or a joint pressing on something, cannot break a printed part.
+TELEOP_MAX_STEP = 40
+TELEOP_START_STEP = 4
+TELEOP_RAMP_CYCLES = 50
+TELEOP_TORQUE_LIMIT = {"shoulder_pan": 600, "shoulder_lift": 700, "elbow_flex": 600, "wrist_flex": 450,
+                       "wrist_roll": 350, "gripper": 350}
+TELEOP_TORQUE_DEFAULT = {"gripper": 500}  # restored afterwards (LeRobot's gripper limit); others 1000
 TELEOP_ERR_PASS = 6.0  # mean tracking error, normalized units
 TELEOP_ERR_WARN = 12.0

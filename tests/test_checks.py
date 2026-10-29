@@ -101,6 +101,10 @@ def test_teleop_checks():
     assert [(c.id, c.joint) for c in mirrored] == [("teleop.mirrored", "elbow_flex")]
     # far apart on the same side is a pose difference, not a reversed motor
     assert K.check_teleop_start(rest, rest | {"elbow_flex": 40.0})[0].id == "teleop.aligned"
+    # the wrists turned ~210 degrees apart (the case that broke a follower's wrist housing): refused, and
+    # not mistaken for a reversed motor
+    wrist = K.check_teleop_start(rest | {"wrist_roll": 52.0}, rest | {"wrist_roll": -67.0})
+    assert [c.id for c in wrist] == ["teleop.aligned"] and "wrist_roll" in wrist[0].message
     # the leader's trigger rests open while the follower's gripper rests closed: not a reason to refuse
     assert K.worst(K.check_teleop_start(rest | {"gripper": 97.0}, rest | {"gripper": 0.0})) == "pass"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 2.0}, 100)) == "pass"

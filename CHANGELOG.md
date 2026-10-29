@@ -2,6 +2,13 @@
 
 ## 0.1.5
 
+- **Safety fix for the teleop test (all earlier versions are affected).** wrist_roll was left out of the
+  start check, so a leader wrist turned ~200 degrees away from the follower's made the follower spin its
+  wrist at full torque, which cracked a follower's wrist housing. Now:
+  - wrist_roll must match before torque goes on (only the gripper is left out);
+  - the follower starts slowly (ramping up over ~2 s) and never moves faster than ~90 deg/s;
+  - torque is limited during the test (35-70 % per joint) and restored afterwards.
+
 - The teleop test no longer stops at eight check screens waiting for Enter: checks that need nothing from
   you (remembered port, motors, voltage, stored calibration) run by themselves and only stop on a problem.
 - The gripper no longer has to match at the start: the leader's trigger rests open while the follower's

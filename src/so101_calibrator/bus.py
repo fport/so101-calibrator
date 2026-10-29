@@ -29,6 +29,7 @@ REGISTERS = {
     "Torque_Enable": (40, 1, None),
     "Acceleration": (41, 1, None),
     "Goal_Position": (42, 2, 15),
+    "Torque_Limit": (48, 2, None),  # RAM, 0..1000 = 0..100 %; loaded from Max_Torque_Limit at power-up
     "Lock": (55, 1, None),
     "Present_Position": (56, 2, 15),
     "Present_Load": (60, 2, 10),
@@ -296,6 +297,12 @@ class Arm:
             self.bus.write("Max_Torque_Limit", g, 500)
             self.bus.write("Protection_Current", g, 250)
             self.bus.write("Overload_Torque", g, 25)
+
+    def limit_torque(self, limits: dict[str, int]) -> None:
+        """Torque_Limit per joint (0..1000). RAM only: a power cycle restores the EEPROM default."""
+        with self.lock:
+            for j, v in limits.items():
+                self.bus.write("Torque_Limit", MOTOR_IDS[j], int(v))
 
     def write_goals(self, goals: dict[str, int]) -> None:
         with self.lock:

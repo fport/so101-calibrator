@@ -468,8 +468,6 @@ class TeleopStep(Step):
     kind, title = "teleop", "Leader -> follower test"
     live = True
     needs = ("stored:leader", "stored:follower")
-    max_step = 60  # ticks per cycle the follower goal may move (~5 deg at 30 Hz)
-    settle_cycles = 20
 
     def __init__(self) -> None:
         super().__init__("follower")
@@ -513,6 +511,7 @@ class TeleopStep(Step):
             return checks
         self.start_checks = checks
         follower.configure_follower()
+        follower.limit_torque(P.TELEOP_TORQUE_LIMIT)
         self.goal = follower.positions()
         follower.write_goals(self.goal)
         follower.set_torque(True)  # a failure part-way is undone by abort(), which every exit path calls
@@ -527,13 +526,15 @@ class TeleopStep(Step):
         lcal, fcal = s.draft.stored["leader"], s.draft.stored["follower"]
         target = {j: C.unnormalize(j, C.normalize(j, lpos[j], lcal[j]), fcal[j]) for j in JOINTS}
         self.cycles += 1
-        if self.last_target and self.cycles > self.settle_cycles:  # let the follower catch up first
+        # slow at first, then capped: the follower creeps towards the leader's pose
+        ramp = min(1.0, self.cycles / P.TELEOP_RAMP_CYCLES)
+        step = round(P.TELEOP_START_STEP + (P.TELEOP_MAX_STEP - P.TELEOP_START_STEP) * ramp)
+        if self.last_target and self.cycles > P.TELEOP_RAMP_CYCLES:  # let the follower catch up first
             # tracking error against what the leader asked for one cycle ago (the follower lags a cycle)
             for j in self.err_sum:
                 self.err_sum[j] += abs(C.normalize(j, fpos[j], fcal[j]) - C.normalize(j, self.last_target[j], fcal[j]))
             self.samples += 1
-        self.goal = {j: self.goal[j] + max(-self.max_step, min(self.max_step, target[j] - self.goal[j]))
-                     for j in JOINTS}
+        self.goal = {j: self.goal[j] + max(-step, min(step, target[j] - self.goal[j])) for j in JOINTS}
         self.arm(s, "follower").write_goals(self.goal)
         self.last_target = target
 
@@ -548,7 +549,12 @@ class TeleopStep(Step):
 
     def abort(self, s):
         if "follower" in s.arms:
-            s.arms["follower"].torque_off()
+            follower = s.arms["follower"]
+            follower.torque_off()
+            try:  # back to the full torque LeRobot expects (best effort: torque is already off)
+                follower.limit_torque({j: P.TELEOP_TORQUE_DEFAULT.get(j, 1000) for j in JOINTS})
+            except Exception:
+                pass
 
     def progress(self, s):
         if self.t0 is None:

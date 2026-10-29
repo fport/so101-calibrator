@@ -1,5 +1,5 @@
 from so101_calibrator import calibration as C
-from so101_calibrator.mock import MockActor, MockRig
+from so101_calibrator.mock import MockActor, MockHand, MockRig
 from so101_calibrator.profiles import HALF_TURN, JOINTS
 from so101_calibrator.wizard import Session, Target
 
@@ -222,3 +222,48 @@ def test_a_failing_automatic_check_stops_the_run(store):
     for _ in range(20):
         s.poll()
     assert s.step.id == "port:follower" and s.state.status == "fail"
+
+
+def test_teleop_refuses_wrists_turned_apart_and_never_torques(store):
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    calibrate(store, rig, "follower")
+    targets = (Target("leader", "leader", rig.LEADER_PORT), Target("follower", "follower", rig.FOLLOWER_PORT))
+    s = Session.teleop(make_ctx(store, rig), *targets)
+    drive(s, rig, until="teleop")
+    MockHand(rig.leader).rest()
+    MockHand(rig.follower).rest()
+    rig.leader.set_pose("wrist_roll", 0.5)  # the leader's wrist turned, the follower's not
+    rig.follower.set_pose("wrist_roll", -0.6)
+    s.start()
+    assert s.state.status == "fail" and [c.id for c in failing(s)] == ["teleop.aligned"]
+    bus = rig.bus(rig.FOLLOWER_PORT)
+    assert not any(r == "Torque_Enable" and v for r, _, v in bus.writes)
+
+
+def test_teleop_starts_slowly_with_limited_torque_and_restores_it(store):
+    from so101_calibrator import profiles as P
+
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    calibrate(store, rig, "follower")
+    targets = (Target("leader", "leader", rig.LEADER_PORT), Target("follower", "follower", rig.FOLLOWER_PORT))
+    s = Session.teleop(make_ctx(store, rig, teleop_seconds=60), *targets)
+    drive(s, rig, until="teleop")
+    MockHand(rig.leader).rest()
+    MockHand(rig.follower).rest()
+    bus = rig.bus(rig.FOLLOWER_PORT)
+    s.start()
+    assert s.state.status == "running"
+    limited = [(i, v) for r, i, v in bus.writes if r == "Torque_Limit"]
+    assert limited and all(v <= 700 for _, v in limited)  # set before torque went on
+    first_torque = next(n for n, (r, _, v) in enumerate(bus.writes) if r == "Torque_Enable" and v)
+    assert max(n for n, (r, _, _) in enumerate(bus.writes) if r == "Torque_Limit") < first_torque
+    before = {i: bus.regs[i]["Goal_Position"] for i in range(1, 7)}
+    rig.leader.set_pose("elbow_flex", 0.0)  # the leader jumps far away
+    s.poll()
+    moved = max(abs(bus.regs[i]["Goal_Position"] - before[i]) for i in range(1, 7))
+    assert 0 < moved <= P.TELEOP_START_STEP + 1  # the follower only creeps at first
+    s.abort()
+    assert bus.regs[3]["Torque_Limit"] == 1000 and bus.regs[6]["Torque_Limit"] == 500
+    assert not bus.regs[3]["Torque_Enable"]

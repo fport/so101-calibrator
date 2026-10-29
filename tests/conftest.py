@@ -55,9 +55,9 @@ def drive(session: Session, rig: MockRig, *, accept_warnings=True, until=None):
                     session.stop()
                 elif st.kind == "teleop":
                     start = dict(rig.leader.pose)
-                    for k in range(40):  # unfold every joint a little, towards the middle
+                    for k in range(120):  # unfold every joint a little, towards the middle (past the slow start)
                         for j, v in start.items():
-                            rig.leader.set_pose(j, v + (0.2 if v <= 0 else -0.2) * (k / 40))
+                            rig.leader.set_pose(j, v + (0.2 if v <= 0 else -0.2) * (k / 120))
                         session.poll()
                     session.stop()
         elif state.status == "warn" and accept_warnings:
