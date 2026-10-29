@@ -1,7 +1,8 @@
 from so101_calibrator import calibration as C
+from so101_calibrator import profiles as P
 from so101_calibrator.mock import MockActor, MockRig
 from so101_calibrator.profiles import HALF_TURN, JOINTS
-from so101_calibrator.wizard import Session, Target
+from so101_calibrator.wizard import DirectionStep, Draft, Session, Target
 
 from .conftest import calibrate, drive, make_ctx
 
@@ -178,3 +179,84 @@ def test_ranges_stopped_early_fails_without_breaking_snapshot(store):
     assert all(j["norm"] is None for j in snap["arms"]["follower"]["joints"].values() if j["cal_min"] == j["cal_max"])
     s.retry()
     assert s.snapshot()["current"]["status"] == "ready"
+
+
+class _Live:
+    """Just enough of a Session for DirectionStep.tick: live positions and a log."""
+
+    def __init__(self):
+        self.live = {"leader": {j: 2047 for j in JOINTS}}
+        self.draft = Draft()
+
+    def log(self, *_):
+        pass
+
+    def at(self, **moves):
+        self.live["leader"] = {j: 2047 + moves.get(j, 0) for j in JOINTS}
+
+    def rest(self, step):
+        for _ in range(P.DIRECTION_STILL_POLLS + 1):
+            step.tick(self)
+
+
+def test_direction_ignores_a_bump_before_the_arm_rests():
+    step, s = DirectionStep("leader"), _Live()
+    step.reset()
+    s.at(shoulder_pan=+300)  # picked up and turned before ever resting: not a measurement
+    step.tick(s)
+    assert step.signs == {}
+    s.rest(step)
+    s.at(shoulder_pan=+300 - 400)  # now the real move, from the pose it rested in
+    step.tick(s)
+    assert step.signs == {"shoulder_pan": -1}
+
+
+def test_direction_ignores_a_swinging_wrist_and_the_wrong_joint():
+    step, s = DirectionStep("leader"), _Live()
+    step.reset()
+    step.signs = {j: 1 for j in JOINTS[:3]}  # up to elbow_flex done; wrist_flex is next
+    s.at(elbow_flex=400)
+    s.rest(step)
+    s.at(elbow_flex=0, wrist_flex=+250)  # elbow back; the loose wrist swings on its own meanwhile
+    step.tick(s)
+    assert "wrist_flex" not in step.signs
+    s.rest(step)
+    s.at(elbow_flex=0, wrist_flex=+250, wrist_roll=-400)  # moving another joint records nothing either
+    step.tick(s)
+    assert "wrist_flex" not in step.signs
+    s.at(elbow_flex=0, wrist_flex=+250)
+    s.rest(step)
+    s.at(elbow_flex=0, wrist_flex=+250 - 300)  # the wrist itself, deliberately
+    step.tick(s)
+    assert step.signs["wrist_flex"] == -1
+
+
+def test_direction_waits_for_a_joint_resting_at_its_end_stop():
+    step, s = DirectionStep("leader"), _Live()
+    step.reset()
+    s.draft.mins, s.draft.maxes = {j: 1000 for j in JOINTS}, {j: 3000 for j in JOINTS}
+    s.at(shoulder_pan=-1000)  # against its stop: it can only be moved one way, maybe the wrong one
+    s.rest(step)
+    assert step._at_stop(s, "shoulder_pan", s.live["leader"])
+    s.at(shoulder_pan=-1000 + 300)
+    step.tick(s)
+    assert step.signs == {}
+    s.at(shoulder_pan=0)  # brought to the middle, then measured
+    s.rest(step)
+    s.at(shoulder_pan=-200)
+    step.tick(s)
+    assert step.signs == {"shoulder_pan": -1}
+
+
+def test_direction_checks_in_turkish():
+    from so101_calibrator.checks import check_directions
+    from so101_calibrator.i18n import check_text
+
+    signs = {j: 1 for j in JOINTS}
+    bad = check_directions(signs, signs | {"wrist_flex": -1}, "follower 'follower'")[0].to_dict()
+    msg, fix = check_text(bad, "tr")
+    assert msg == "wrist_flex: follower 'follower' ile ters yönde oynadı." and "ters takılı" in fix
+    msg, _ = check_text(check_directions(signs, signs | {"gripper": -1}, "previous")[0].to_dict(), "tr")
+    assert "önceki kalibrasyon" in msg
+    old = {"id": "direction.mismatch", "status": "fail", "message": "old text", "fix": "old fix"}
+    assert check_text(old, "tr") == ("old text", "old fix")  # records saved before translations

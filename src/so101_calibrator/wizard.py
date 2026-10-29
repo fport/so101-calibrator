@@ -368,11 +368,17 @@ class DirectionStep(Step):
 
     def reset(self):
         self.signs: dict[str, int] = {}
-        self.base: dict[str, int] = {}
+        # A joint is only measured from a pose the arm rests in (`base`), and only while it is the joint
+        # that moved most. A loose wrist swinging while the previous joint goes back, or the arm bumped
+        # while picking it up, would otherwise be recorded as a direction.
+        self.base: dict[str, int] | None = None
+        self.anchor: dict[str, int] | None = None
+        self.still = 0
 
     def instructions(self, s):
-        return ("Press Start. For each joint shown, move it a little in the direction described, then back. "
-                "The tool records which way the encoder counts so leader and follower can be compared.")
+        return ("Press Start. For each joint shown, move only that joint a little in the direction shown, back "
+                "again, then pause. The tool records which way the encoder counts so leader and follower can be "
+                "compared.")
 
     @property
     def current(self) -> str | None:
@@ -380,15 +386,26 @@ class DirectionStep(Step):
 
     def hint_spec(self, s):
         if self.running(s) and self.current:
+            if self._at_stop(s, self.current, s.live.get(self.role)):
+                return "hint.direction.middle", {"joint": self.current}
             return "hint.direction", {"joint": self.current}
         return "hint.direction.ready", {}
+
+    @staticmethod
+    def _at_stop(s, j: str, pos: dict[str, int] | None) -> bool:
+        """Near an end of the range just recorded: a joint there can only be moved one way, which may be
+        the wrong one, so it is not measured until it is brought towards the middle."""
+        d = s.draft
+        if not pos or not d.mins or not d.maxes or j not in d.mins or j in FULL_TURN_JOINTS:
+            return False
+        margin = (d.maxes[j] - d.mins[j]) * P.DIRECTION_END_MARGIN
+        return not d.mins[j] + margin <= pos[j] <= d.maxes[j] - margin
 
     def illustration(self, s):
         return f"direction_{self.current or JOINTS[0]}"
 
     def begin(self, s):
         self.reset()
-        self.base = self.arm(s).positions()
         return None
 
     def tick(self, s):
@@ -396,11 +413,17 @@ class DirectionStep(Step):
         pos = s.live.get(self.role)
         if j is None or not pos:
             return
-        d = wrap_delta(self.base[j], pos[j])
-        if abs(d) >= P.DIRECTION_MIN_MOVE:
-            self.signs[j] = 1 if d > 0 else -1
-            s.log(f"{j}: recorded ({'+' if d > 0 else '-'})")
-            self.base = dict(pos)
+        if self.anchor and all(abs(wrap_delta(self.anchor[k], pos[k])) <= P.DIRECTION_STILL_TICKS for k in pos):
+            self.still += 1
+        else:
+            self.anchor, self.still = dict(pos), 0
+        moved = {k: wrap_delta(self.base[k], pos[k]) for k in pos} if self.base else {}
+        if moved and abs(moved[j]) >= P.DIRECTION_MIN_MOVE and all(abs(moved[j]) >= abs(v) for v in moved.values()):
+            self.signs[j] = 1 if moved[j] > 0 else -1
+            s.log(f"{j}: recorded ({'+' if moved[j] > 0 else '-'})")
+            self.base = None  # the next joint waits until this one is back and the arm rests again
+        elif self.still >= P.DIRECTION_STILL_POLLS:
+            self.base = None if self._at_stop(s, j, pos) else dict(pos)
 
     def done(self, s):
         return self.current is None
@@ -411,7 +434,8 @@ class DirectionStep(Step):
         missing = [j for j in JOINTS if j not in self.signs]
         if missing:
             checks.append(K.Check("direction.incomplete", K.WARN, f"No direction recorded for {', '.join(missing)}.",
-                                  "Retry and move each joint at least ~15 degrees."))
+                                  "Retry: move each joint at least ~15 degrees, then pause.",
+                                  args={"joints": ", ".join(missing)}))
         other = "leader" if self.role == "follower" else "follower"
         paired = s.ctx.store.latest_directions(other, exclude_arm=s.targets[self.role].arm_id)
         if paired:
@@ -419,7 +443,7 @@ class DirectionStep(Step):
         prev = s.previous[self.role]
         prev_dirs = prev.data.get("directions") if prev else None
         if prev_dirs:
-            checks += K.check_directions(self.signs, prev_dirs, "previous calibration")
+            checks += K.check_directions(self.signs, prev_dirs, "previous")
         if not paired and not prev_dirs:
             checks += K.check_directions(self.signs, None, "")
         return checks

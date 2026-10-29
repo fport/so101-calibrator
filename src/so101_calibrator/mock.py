@@ -222,12 +222,14 @@ class MockHand:
                 if t > 1.0:
                     return
             elif script == "directions":
-                # each joint: ramp out to +0.35 and back, 0.8 s per joint
-                idx = int(t // 0.8)
+                # each joint: rest (directions are measured from a pose at rest), then out to +0.35 and back
+                rest, move = 1.6, 0.8
+                idx, phase = int(t // (rest + move)), t % (rest + move)
                 if idx >= len(JOINTS):
                     return
-                j, phase = JOINTS[idx], (t % 0.8) / 0.8
-                self.arm.set_pose(j, 0.35 * _plateau(math.sin(phase * math.pi)))
+                j = JOINTS[idx]
+                out = math.sin((phase - rest) / move * math.pi) if phase > rest else 0.0
+                self.arm.set_pose(j, 0.35 * _plateau(out))
                 for k in range(idx):
                     self.arm.set_pose(JOINTS[k], 0.0)
             elif script == "wander":

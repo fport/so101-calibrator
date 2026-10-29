@@ -1,5 +1,6 @@
 import pytest
 
+from so101_calibrator import profiles as P
 from so101_calibrator.env import Env
 from so101_calibrator.mock import MockHand, MockRig
 from so101_calibrator.store import Store
@@ -53,6 +54,8 @@ def drive(session: Session, rig: MockRig, *, accept_warnings=True, until=None):
                 elif st.kind == "direction":
                     arm = rig.arm(st.role)
                     for j in list(arm.pose):
+                        for _ in range(P.DIRECTION_STILL_POLLS + 1):  # at rest before each joint
+                            session.poll()
                         arm.set_pose(j, 0.35)
                         session.poll()
                         arm.set_pose(j, 0.0)

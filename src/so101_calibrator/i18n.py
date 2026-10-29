@@ -33,6 +33,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "hint.ranges": "Move each joint to *both ends*",
         "hint.direction.ready": "Move each joint *a little*, as shown",
         "hint.direction": "{joint}: {prompt}",
+        "hint.direction.middle": "{joint}: bring it to the *middle* first",
         "hint.save": "*Save* the calibration",
         "hint.match": "Compare the motors with the *saved* calibration",
         "hint.pose": "Put the arm in the *middle* pose again",
@@ -42,13 +43,20 @@ STRINGS: dict[str, dict[str, str]] = {
         "sub.motors": "Motors 1–6 should answer.",
         "sub.power": "Follower 12 V, leader 5 V.",
         "sub.homing": "Upper arm and forearm at a right angle, gripper half open.",
-        "sub.ranges": "Leave wrist_roll alone. Back to the middle, then ⏎.",
-        "sub.direction": "Each joint moves on by itself once it is seen.",
+        "sub.ranges": "Not wrist_roll, it turns all the way. Then back to the middle pose and ⏎.",
+        "sub.direction": "Start from the pose shown. Move only this joint, then pause.",
+        "check.direction.mismatch": "{joint}: moved the opposite way to the {ref}.",
+        "check.direction.mismatch.fix": "Either {joint} was moved the wrong way in this step, or its motor is mounted "
+        "reversed. Retry following the picture; if it happens again, compare the motor and horn on both arms. "
+        "Teleoperation would drive this joint backwards.",
+        "check.direction.incomplete": "No direction recorded for {joints}.",
+        "check.direction.incomplete.fix": "Retry: move each joint at least ~15 degrees, then pause.",
+        "ref.previous": "previous calibration",
         "sub.save": "Written to the motors and exported for LeRobot.",
         "sub.match": "",
         "sub.pose": "Each joint should read about 2047.",
         "sub.teleop": "The follower mirrors it. Keep a hand near it.",
-        "joint.shoulder_pan": "turn the whole arm to *its left*",
+        "joint.shoulder_pan": "turn the arm *left, seen from behind*",
         "joint.shoulder_lift": "lift the upper arm *up*",
         "joint.elbow_flex": "*unfold* the elbow",
         "joint.wrist_flex": "tilt the wrist *up*",
@@ -93,6 +101,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "hint.ranges": "Her eklemi *iki ucuna* götür",
         "hint.direction.ready": "Her eklemi gösterildiği gibi *biraz* oynat",
         "hint.direction": "{joint}: {prompt}",
+        "hint.direction.middle": "{joint}: önce *ortaya* getir",
         "hint.save": "Kalibrasyonu *kaydet*",
         "hint.match": "Motorları *kayıtlı* kalibrasyonla karşılaştır",
         "hint.pose": "Kolu yine *orta* poza getir",
@@ -102,13 +111,19 @@ STRINGS: dict[str, dict[str, str]] = {
         "sub.motors": "1–6 numaralı motorlar cevap vermeli.",
         "sub.power": "Follower 12 V, leader 5 V.",
         "sub.homing": "Üst kol ile ön kol dik açı, gripper yarı açık.",
-        "sub.ranges": "wrist_roll'a dokunma. Bitince ortaya dön ve ⏎.",
-        "sub.direction": "Her eklem algılanınca kendiliğinden geçer.",
+        "sub.ranges": "wrist_roll hariç, o tam tur döner. Bitince kolu dik açılı orta duruşa getir ve ⏎.",
+        "sub.direction": "Resimdeki duruştan başla. Sadece bu eklemi oynat, sonra bir an bekle.",
+        "check.direction.mismatch": "{joint}: {ref} ile ters yönde oynadı.",
+        "check.direction.mismatch.fix": "Ya {joint} bu adımda ters yöne oynatıldı ya da motoru ters takılı. Resme "
+        "bakarak tekrar dene; yine çıkarsa iki koldaki motoru ve horn'u karşılaştır. Teleop bu eklemi ters yöne sürer.",
+        "check.direction.incomplete": "{joints} için yön ölçülmedi.",
+        "check.direction.incomplete.fix": "Tekrar dene: her eklemi en az ~15 derece oynat, sonra bir an bekle.",
+        "ref.previous": "önceki kalibrasyon",
         "sub.save": "Motorlara yazılır ve LeRobot için dışa aktarılır.",
         "sub.match": "",
         "sub.pose": "Her eklem yaklaşık 2047 okumalı.",
         "sub.teleop": "Follower onu taklit eder. Elin yakında olsun.",
-        "joint.shoulder_pan": "tüm kolu *kendi soluna* çevir",
+        "joint.shoulder_pan": "kolu *arkasından bakınca sola* çevir",
         "joint.shoulder_lift": "üst kolu *yukarı* kaldır",
         "joint.elbow_flex": "dirseği *aç*",
         "joint.wrist_flex": "bileği *yukarı* eğ",
@@ -166,6 +181,16 @@ def t(key: str, lang: str | None = None, **kw) -> str:
 
 def plain(text: str) -> str:
     return text.replace("*", "")
+
+
+def check_text(check: dict, lang: str | None = None) -> tuple[str, str]:
+    """(message, fix) of a check (checks.Check.to_dict) in `lang`; checks without a translation stay English."""
+    key, args = f"check.{check['id']}", check.get("args")
+    if args is None or key not in STRINGS["en"]:
+        return check["message"], check.get("fix", "")
+    if args.get("ref") == "previous":
+        args = {**args, "ref": t("ref.previous", lang)}
+    return t(key, lang, **args), t(f"{key}.fix", lang, **args)
 
 
 def hint(key: str, args: dict, lang: str | None = None) -> str:

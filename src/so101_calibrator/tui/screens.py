@@ -12,7 +12,7 @@ from textual.containers import Center, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Static
 
-from ..i18n import hint, t
+from ..i18n import check_text, hint, t
 from ..profiles import JOINTS
 from ..store import StoreError, tilde
 from .widgets import THEME, AIPanel, Sprite, ago, emphasis, joints_text, keys
@@ -318,9 +318,10 @@ class RunScreen(AppScreen):
             for c in bad:
                 icon, colour = ("✗", THEME.error) if c["status"] == "fail" else ("!", THEME.accent)
                 out.append(f"{icon} ", style=f"bold {colour}")
-                out.append(f"{c['message']}\n", style=THEME.fg)
-                if c.get("fix"):
-                    out.append(f"{c['fix']}\n", style=THEME.dim)
+                message, fix = check_text(c)
+                out.append(f"{message}\n", style=THEME.fg)
+                if fix:
+                    out.append(f"{fix}\n", style=THEME.dim)
             if summary and st["checks"] and not bad:
                 out.append(f"✓ {t('checks.passed', n=len(st['checks']))}", style=THEME.dim)
         return out

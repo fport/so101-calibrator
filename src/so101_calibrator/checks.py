@@ -21,6 +21,7 @@ class Check:
     message: str
     fix: str = ""
     joint: str | None = None
+    args: dict | None = None  # values for a translated message (i18n "check.<id>"); English is in message/fix
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -196,19 +197,23 @@ def check_ranges(mins: dict[str, int], maxes: dict[str, int], prof: RoleProfile,
 
 
 # --- direction -------------------------------------------------------------------------------------
-def check_directions(signs: dict[str, int], reference: dict[str, int] | None, ref_label: str) -> list[Check]:
-    """`reference`: signs recorded for the paired arm or a previous calibration of the same arm."""
+def check_directions(signs: dict[str, int], reference: dict[str, int] | None, ref: str) -> list[Check]:
+    """`reference`: signs recorded for the paired arm (`ref` like "leader 'leader'") or for a previous
+    calibration of the same arm (`ref` "previous")."""
     checks = []
     if not reference:
         return [_ok("direction.recorded", "Joint directions recorded (nothing to compare with yet).")]
+    label = "previous calibration" if ref == "previous" else ref
     for j in JOINTS:
         if j in reference and j in signs and reference[j] != signs[j]:
-            checks.append(Check("direction.mismatch", FAIL, f"{j}: moves the opposite way to the {ref_label}.",
-                                f"The motor in {j} is probably mounted reversed (or the horn flipped). "
-                                "Re-assemble it the same way as on the other arm; teleoperation would drive "
-                                "this joint backwards.", j))
+            # the tool cannot tell a joint moved the wrong way from a reversed motor: name both, cheapest first
+            checks.append(Check("direction.mismatch", FAIL, f"{j}: moved the opposite way to the {label}.",
+                                f"Either {j} was moved the wrong way in this step, or its motor is mounted "
+                                "reversed. Retry following the picture; if it happens again, compare the motor and "
+                                "horn on both arms. Teleoperation would drive this joint backwards.", j,
+                                args={"joint": j, "ref": ref}))
     if not checks:
-        checks.append(_ok("direction.match", f"All joint directions match the {ref_label}."))
+        checks.append(_ok("direction.match", f"All joint directions match the {label}."))
     return checks
 
 

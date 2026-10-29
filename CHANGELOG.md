@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Joint directions are only measured from a pose the arm rests in, and only while the shown joint is the
+  one moving most. A loose leader wrist swinging back, or the arm bumped while picking it up, no longer
+  shows up as a reversed motor.
+- A direction mismatch now says it may be a joint moved the wrong way as well as a reversed motor, and is
+  shown in Turkish too. The shoulder_pan prompt reads "left, seen from behind" instead of "its left".
+- A joint resting against an end stop (it could only be moved one way) is not measured: the hint asks to
+  bring it to the middle first. The ranges step says what "the middle" is.
+
 ## 0.1.1
 
 - Shorter README with a hero image and badges, so the PyPI page matches GitHub. No code changes.
