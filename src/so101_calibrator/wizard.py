@@ -373,7 +373,7 @@ class DirectionStep(Step):
         # while picking it up, would otherwise be recorded as a direction.
         self.base: dict[str, int] | None = None
         self.anchor: dict[str, int] | None = None
-        self.still = 0
+        self.still, self.still_since = 0, 0.0
 
     def instructions(self, s):
         return ("Press Start. For each joint shown, move only that joint a little in the direction shown, back "
@@ -416,13 +416,17 @@ class DirectionStep(Step):
         if self.anchor and all(abs(wrap_delta(self.anchor[k], pos[k])) <= P.DIRECTION_STILL_TICKS for k in pos):
             self.still += 1
         else:
-            self.anchor, self.still = dict(pos), 0
+            self.anchor, self.still, self.still_since = dict(pos), 0, time.monotonic()
+        # at rest: for long enough (polls can be slow on a busy machine) or for many polls (tests poll
+        # back to back)
+        resting = self.still >= P.DIRECTION_STILL_POLLS or (
+            self.still >= 2 and time.monotonic() - self.still_since >= P.DIRECTION_STILL_SECONDS)
         moved = {k: wrap_delta(self.base[k], pos[k]) for k in pos} if self.base else {}
         if moved and abs(moved[j]) >= P.DIRECTION_MIN_MOVE and all(abs(moved[j]) >= abs(v) for v in moved.values()):
             self.signs[j] = 1 if moved[j] > 0 else -1
             s.log(f"{j}: recorded ({'+' if moved[j] > 0 else '-'})")
             self.base = None  # the next joint waits until this one is back and the arm rests again
-        elif self.still >= P.DIRECTION_STILL_POLLS:
+        elif resting:
             self.base = None if self._at_stop(s, j, pos) else dict(pos)
 
     def done(self, s):

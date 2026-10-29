@@ -1,6 +1,8 @@
 # Changelog
 
-## 0.1.2
+## 0.1.3
+
+(0.1.2 was tagged but never published: a CI test failed on macOS.)
 
 - Joint directions are only measured from a pose the arm rests in, and only while the shown joint is the
   one moving most. A loose leader wrist swinging back, or the arm bumped while picking it up, no longer

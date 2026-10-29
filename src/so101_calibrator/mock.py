@@ -223,7 +223,7 @@ class MockHand:
                     return
             elif script == "directions":
                 # each joint: rest (directions are measured from a pose at rest), then out to +0.35 and back
-                rest, move = 1.6, 0.8
+                rest, move = 2.0, 0.8
                 idx, phase = int(t // (rest + move)), t % (rest + move)
                 if idx >= len(JOINTS):
                     return
