@@ -13,7 +13,6 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Static
 
 from ..i18n import check_text, hint, t
-from ..profiles import JOINTS
 from ..store import StoreError, tilde
 from .widgets import THEME, AIPanel, Sprite, ago, emphasis, joints_text, keys
 
@@ -300,11 +299,6 @@ class RunScreen(AppScreen):
         if "recorded" in p:
             fills = [r["fill"] for r in p["recorded"].values()]
             bar(sum(fills) / max(1, len(fills)), t("coverage"))
-        elif "signs" in p:
-            for j in JOINTS:
-                mark, style = ("●", THEME.accent) if j in p["signs"] else (
-                    ("◉", f"bold {THEME.accent}") if j == p.get("joint") else ("○", THEME.dim))
-                out.append(f"{mark} ", style=style)
         elif "elapsed" in p:
             bar(p["elapsed"] / max(0.1, p["seconds"]), t("time"))
         return out

@@ -28,8 +28,9 @@ so101-cal                            # then with your arms plugged in
 uv tool upgrade so101-calibrator     # later, to update (or: pipx upgrade / pip install -U)
 ```
 
-Pick **Follower**, then **Leader**, then **Test both arms**. Every screen shows one thing to do; the joint
-to move is orange; **Enter** goes on. LeRobot then finds the calibration with no extra flags.
+Pick **Follower**, then **Leader**, then **Test both arms** (start it with both arms folded). Every screen
+shows one thing to do; the joint to move is orange; **Enter** goes on. LeRobot then finds the calibration
+with no extra flags.
 
 ## Why
 
@@ -39,9 +40,9 @@ step is checked, every failure says what to fix, and every calibration is kept a
 
 | | |
 | --- | --- |
-| ✅ **Checked steps** | USB port, motors 1–6, supply voltage, middle pose, ranges, joint directions, save |
+| ✅ **Checked steps** | USB port, motors 1–6, supply voltage, middle pose, ranges, save |
 | 🕘 **Versions** | history, diff, one-key rollback, export to LeRobot |
-| 🦾 **Teleop test** | leader → follower, refuses to start if the poses differ |
+| 🦾 **Teleop test** | leader → follower; from the folded rest pose it spots a reversed motor before any torque |
 | 💬 **Assistant** | optional, local ([Strands](https://strandsagents.com) + Ollama) or Claude |
 | 🧪 **Mock arm** | try everything without hardware |
 
@@ -146,7 +147,7 @@ Exports: the LeRobot cache, `~/.cache/huggingface/lerobot/calibration/robots/so_
 | No motor answers | Power adapter off, or the cable to the first motor |
 | Motors answer at another baud rate | Run `lerobot-setup-motors` once |
 | Missing motor id 4 | Loose cable going into motor 4 |
-| Direction mismatch on one joint | A motor or horn is mounted the other way round |
+| Teleop test: a joint's values are "mirror images" | A motor or horn is mounted the other way round on one arm |
 | EEPROM differs | Motor replaced or another tool wrote it: recalibrate or `so101-cal write` |
 
 </details>

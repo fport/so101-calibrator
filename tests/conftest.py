@@ -1,6 +1,5 @@
 import pytest
 
-from so101_calibrator import profiles as P
 from so101_calibrator.env import Env
 from so101_calibrator.mock import MockHand, MockRig
 from so101_calibrator.store import Store
@@ -33,6 +32,9 @@ def drive(session: Session, rig: MockRig, *, accept_warnings=True, until=None):
         if state.status == "ready":
             if st.kind in ("homing", "pose"):
                 hand.middle()
+            elif st.kind == "teleop":  # both arms folded, as the step asks
+                MockHand(rig.leader).rest()
+                MockHand(rig.follower).rest()
             session.start()
             if session.state is state and state.status == "running":
                 if st.kind == "port":
@@ -51,21 +53,11 @@ def drive(session: Session, rig: MockRig, *, accept_warnings=True, until=None):
                         rig.arm(st.role).set_pose(j, 0.0)
                     session.poll()
                     session.stop()
-                elif st.kind == "direction":
-                    arm = rig.arm(st.role)
-                    for j in list(arm.pose):
-                        for _ in range(P.DIRECTION_STILL_POLLS + 1):  # at rest before each joint
-                            session.poll()
-                        arm.set_pose(j, 0.35)
-                        session.poll()
-                        arm.set_pose(j, 0.0)
-                        session.poll()
-                    if session.state is state and state.status == "running":
-                        session.stop()
                 elif st.kind == "teleop":
-                    for k in range(40):
-                        for j in rig.leader.pose:
-                            rig.leader.set_pose(j, 0.2 * (k / 40))
+                    start = dict(rig.leader.pose)
+                    for k in range(40):  # unfold every joint a little, towards the middle
+                        for j, v in start.items():
+                            rig.leader.set_pose(j, v + (0.2 if v <= 0 else -0.2) * (k / 40))
                         session.poll()
                     session.stop()
         elif state.status == "warn" and accept_warnings:

@@ -17,19 +17,6 @@ MOTOR_IDS = {name: i + 1 for i, name in enumerate(JOINTS)}
 # wrist_roll turns freely, LeRobot stores it as the full 0..4095 range.
 FULL_TURN_JOINTS = {"wrist_roll"}
 
-# Physical motion asked for in the direction test. The tool does not assume which raw sign is "right";
-# it records the sign and requires leader and follower (and past calibrations) to agree, because LeRobot
-# maps the normalized leader value straight onto the follower.
-DIRECTION_PROMPTS = {
-    "shoulder_pan": "rotate the whole arm to ITS left (counter-clockwise seen from above)",
-    "shoulder_lift": "lift the upper arm up / forward",
-    "elbow_flex": "unfold the elbow (forearm away from the upper arm)",
-    "wrist_flex": "tilt the wrist up",
-    "wrist_roll": "roll the wrist clockwise (seen from behind the gripper)",
-    "gripper": "open the gripper / pull the trigger open",
-}
-
-
 @dataclass(frozen=True)
 class JointLimits:
     """Expected encoder span (range_max - range_min) of a healthy calibration, in ticks."""
@@ -101,15 +88,11 @@ CENTER_WARN = 700  # middle of the recorded range this far from HALF_TURN: homin
 EDGE_MARGIN = 20  # range touching 0 / 4095 means the joint crossed the encoder wrap
 DRIFT_OFFSET_WARN = 150  # homing offset change vs. the previous calibration (~13 degrees)
 DRIFT_SPAN_WARN = 0.15  # relative span change vs. the previous calibration
-DIRECTION_MIN_MOVE = 150  # ticks of motion needed before the direction of a joint is decided
-DIRECTION_STILL_TICKS = 15  # an arm whose joints all stay within this many ticks ...
-DIRECTION_STILL_POLLS = 10  # ... for this many polls (~0.4 s) ...
-DIRECTION_STILL_SECONDS = 0.3  # ... or at least this long is at rest
-DIRECTION_END_MARGIN = 0.1  # a joint within this share of its range from an end stop is not measured
 TEMP_WARN_C = 55
 TEMP_FAIL_C = 70
 POSE_TOL_PASS = 120  # verify: middle pose re-found within this many ticks (~10 degrees)
 POSE_TOL_WARN = 250
 TELEOP_START_MAX_DIFF = 20.0  # normalized units; leader and follower must start roughly aligned
+TELEOP_MIRRORED_MIN = 40.0  # both this far from the middle, on opposite sides: a reversed motor
 TELEOP_ERR_PASS = 6.0  # mean tracking error, normalized units
 TELEOP_ERR_WARN = 12.0

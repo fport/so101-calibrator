@@ -131,7 +131,7 @@ def check_homing(offsets: dict[str, int], readback: dict[str, int],
         if abs(off) > 2047:
             checks.append(Check("homing.offset", FAIL, f"{j}: offset {off} cannot be stored (limit +-2047).",
                                 "Move this joint a few degrees and redo the middle pose.", j))
-        elif abs(off) > P.OFFSET_WARN:
+        elif abs(off) > P.OFFSET_WARN and j not in FULL_TURN_JOINTS:  # any horn angle works for a full turn
             checks.append(Check("homing.offset", WARN, f"{j}: offset {off} is close to the +-2047 limit.",
                                 "Works, but usually means the horn was mounted half a turn off. Fine to keep "
                                 "unless you are re-assembling the arm anyway.", j))
@@ -196,27 +196,6 @@ def check_ranges(mins: dict[str, int], maxes: dict[str, int], prof: RoleProfile,
     return checks
 
 
-# --- direction -------------------------------------------------------------------------------------
-def check_directions(signs: dict[str, int], reference: dict[str, int] | None, ref: str) -> list[Check]:
-    """`reference`: signs recorded for the paired arm (`ref` like "leader 'leader'") or for a previous
-    calibration of the same arm (`ref` "previous")."""
-    checks = []
-    if not reference:
-        return [_ok("direction.recorded", "Joint directions recorded (nothing to compare with yet).")]
-    label = "previous calibration" if ref == "previous" else ref
-    for j in JOINTS:
-        if j in reference and j in signs and reference[j] != signs[j]:
-            # the tool cannot tell a joint moved the wrong way from a reversed motor: name both, cheapest first
-            checks.append(Check("direction.mismatch", FAIL, f"{j}: moved the opposite way to the {label}.",
-                                f"Either {j} was moved the wrong way in this step, or its motor is mounted "
-                                "reversed. Retry following the picture; if it happens again, compare the motor and "
-                                "horn on both arms. Teleoperation would drive this joint backwards.", j,
-                                args={"joint": j, "ref": ref}))
-    if not checks:
-        checks.append(_ok("direction.match", f"All joint directions match the {label}."))
-    return checks
-
-
 # --- verification ----------------------------------------------------------------------------------
 def check_motor_matches(stored: Calibration, on_motor: Calibration) -> list[Check]:
     bad = [j for j in JOINTS if j in stored and (
@@ -249,14 +228,30 @@ def check_pose(positions: dict[str, int], target: dict[str, int], label: str) ->
 
 
 def check_teleop_start(leader: dict[str, float], follower: dict[str, float]) -> list[Check]:
-    far = {j: leader[j] - follower[j] for j in JOINTS
+    """Normalized positions of both arms before torque goes on, ideally both folded in the rest pose.
+
+    In the rest pose most joints lie against a stop, so a motor mounted the other way round on one arm reads
+    from the opposite end of its range: the same pose, mirrored values. That is the only reliable way to spot
+    one without asking a person to move a joint "up" or "left".
+    """
+    far = {j: (leader[j], follower[j]) for j in JOINTS
            if j not in FULL_TURN_JOINTS and abs(leader[j] - follower[j]) > P.TELEOP_START_MAX_DIFF}
+    mirrored = [j for j, (lv, fv) in far.items()
+                if j != "gripper" and lv * fv < 0 and min(abs(lv), abs(fv)) > P.TELEOP_MIRRORED_MIN]
+    checks = []
+    for j in mirrored:
+        lv, fv = far.pop(j)
+        checks.append(Check("teleop.mirrored", FAIL, f"{j}: leader reads {lv:+.0f}, follower {fv:+.0f}: mirror "
+                            "images.", f"If both arms really are folded the same way, the {j} motor (or its horn) "
+                            "is mounted the other way round on one arm: re-assemble it like on the other arm. "
+                            "Teleoperation would drive this joint backwards.", j,
+                            args={"joint": j, "leader": f"{lv:+.0f}", "follower": f"{fv:+.0f}"}))
     if far:
-        desc = ", ".join(f"{j} ({d:+.0f})" for j, d in far.items())
-        return [Check("teleop.aligned", FAIL, f"Leader and follower poses differ: {desc}.",
-                      "Hold the leader in the same pose as the follower before starting: the follower jumps "
-                      "to the leader's pose as soon as torque is on.")]
-    return [_ok("teleop.aligned", "Leader and follower start in the same pose.")]
+        desc = ", ".join(f"{j} ({lv - fv:+.0f})" for j, (lv, fv) in far.items())
+        checks.append(Check("teleop.aligned", FAIL, f"Leader and follower poses differ: {desc}.",
+                            "Fold both arms into the rest pose before starting: the follower jumps to the "
+                            "leader's pose as soon as torque is on.", args={"joints": desc}))
+    return checks or [_ok("teleop.aligned", "Leader and follower start in the same pose.")]
 
 
 def check_teleop_tracking(errors: dict[str, float], samples: int) -> list[Check]:
@@ -267,7 +262,8 @@ def check_teleop_tracking(errors: dict[str, float], samples: int) -> list[Check]
     for j, e in errors.items():
         if e > P.TELEOP_ERR_WARN:
             checks.append(Check("teleop.tracking", FAIL, f"{j}: follower lags the leader by {e:.1f} on average.",
-                                "Check this joint's cable, power and that leader/follower directions match.", j))
+                                "Check this joint's cable and power; if the follower moved the other way, its "
+                                "motor or the leader's is mounted reversed.", j))
         elif e > P.TELEOP_ERR_PASS:
             checks.append(Check("teleop.tracking", WARN, f"{j}: tracking error {e:.1f}.",
                                 "Slightly loose; move the leader slower or check for friction.", j))

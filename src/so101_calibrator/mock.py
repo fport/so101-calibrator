@@ -160,6 +160,10 @@ def _plateau(x: float) -> float:
     return max(-1.0, min(1.0, 1.6 * x))
 
 
+REST_POSE = {"shoulder_pan": 0.0, "shoulder_lift": -0.95, "elbow_flex": 0.95, "wrist_flex": 0.7,
+             "wrist_roll": 0.0, "gripper": -0.9}
+
+
 class MockHand:
     """Moves a MockArm the way a person would during each wizard step."""
 
@@ -172,6 +176,11 @@ class MockHand:
     def middle(self) -> None:
         for j in JOINTS:
             self.arm.set_pose(j, random.uniform(-0.03, 0.03))
+
+    def rest(self) -> None:
+        """Folded, lying on the stops (the same physical pose on any SO-101)."""
+        for j, v in REST_POSE.items():
+            self.arm.set_pose(j, v + random.uniform(-0.02, 0.02))
 
     def full_sweep(self, steps: int = 40) -> None:
         """Instant sweep of every joint end to end (for tests)."""
@@ -221,17 +230,6 @@ class MockHand:
                 self.arm.set_pose(joint, min(0.5, t * 0.6))
                 if t > 1.0:
                     return
-            elif script == "directions":
-                # each joint: rest (directions are measured from a pose at rest), then out to +0.35 and back
-                rest, move = 2.0, 0.8
-                idx, phase = int(t // (rest + move)), t % (rest + move)
-                if idx >= len(JOINTS):
-                    return
-                j = JOINTS[idx]
-                out = math.sin((phase - rest) / move * math.pi) if phase > rest else 0.0
-                self.arm.set_pose(j, 0.35 * _plateau(out))
-                for k in range(idx):
-                    self.arm.set_pose(JOINTS[k], 0.0)
             elif script == "wander":
                 # starts from the current pose and drifts smoothly; never jumps
                 if not hasattr(self, "_wander_start"):
@@ -331,9 +329,9 @@ class MockActor:
         elif step.kind == "teleop":
             for h in self.hands.values():
                 h.stop()
-            # hold the leader where the follower is, as the instructions ask
-            for j in JOINTS:
-                self.rig.leader.set_pose(j, self.rig.follower.pose[j])
+            # both arms folded in the rest pose, as the instructions ask
+            for h in self.hands.values():
+                h.rest()
 
     def on_start(self, session, step) -> None:
         if step is None:
@@ -345,8 +343,6 @@ class MockActor:
             self._later(lambda: self.rig.ports.replug(port), 1.4)
         elif step.kind == "ranges":
             hand.animate("sweep")
-        elif step.kind == "direction":
-            hand.animate("directions")
         elif step.kind == "teleop":
             self.hands["leader"].animate("wander")
             self._later(lambda: None, 0)  # keeps idle() False until the step ends itself

@@ -58,7 +58,6 @@ class Draft:
     offsets: dict[str, int] | None = None  # homing step
     mins: dict[str, int] | None = None  # ranges step
     maxes: dict[str, int] | None = None
-    directions: dict[str, int] | None = None  # direction step
     record: int | None = None  # version saved by the save step
     stored: dict[str, C.Calibration] = field(default_factory=dict)  # role -> active version (match steps)
 
@@ -362,103 +361,6 @@ class RangesStep(Step):
                              for j in self.mins}}
 
 
-class DirectionStep(Step):
-    kind, title = "direction", "Joint directions"
-    live = True
-
-    def reset(self):
-        self.signs: dict[str, int] = {}
-        # A joint is only measured from a pose the arm rests in (`base`), and only while it is the joint
-        # that moved most. A loose wrist swinging while the previous joint goes back, or the arm bumped
-        # while picking it up, would otherwise be recorded as a direction.
-        self.base: dict[str, int] | None = None
-        self.anchor: dict[str, int] | None = None
-        self.still, self.still_since = 0, 0.0
-
-    def instructions(self, s):
-        return ("Press Start. For each joint shown, move only that joint a little in the direction shown, back "
-                "again, then pause. The tool records which way the encoder counts so leader and follower can be "
-                "compared.")
-
-    @property
-    def current(self) -> str | None:
-        return next((j for j in JOINTS if j not in self.signs), None)
-
-    def hint_spec(self, s):
-        if self.running(s) and self.current:
-            if self._at_stop(s, self.current, s.live.get(self.role)):
-                return "hint.direction.middle", {"joint": self.current}
-            return "hint.direction", {"joint": self.current}
-        return "hint.direction.ready", {}
-
-    @staticmethod
-    def _at_stop(s, j: str, pos: dict[str, int] | None) -> bool:
-        """Near an end of the range just recorded: a joint there can only be moved one way, which may be
-        the wrong one, so it is not measured until it is brought towards the middle."""
-        d = s.draft
-        if not pos or not d.mins or not d.maxes or j not in d.mins or j in FULL_TURN_JOINTS:
-            return False
-        margin = (d.maxes[j] - d.mins[j]) * P.DIRECTION_END_MARGIN
-        return not d.mins[j] + margin <= pos[j] <= d.maxes[j] - margin
-
-    def illustration(self, s):
-        return f"direction_{self.current or JOINTS[0]}"
-
-    def begin(self, s):
-        self.reset()
-        return None
-
-    def tick(self, s):
-        j = self.current
-        pos = s.live.get(self.role)
-        if j is None or not pos:
-            return
-        if self.anchor and all(abs(wrap_delta(self.anchor[k], pos[k])) <= P.DIRECTION_STILL_TICKS for k in pos):
-            self.still += 1
-        else:
-            self.anchor, self.still, self.still_since = dict(pos), 0, time.monotonic()
-        # at rest: for long enough (polls can be slow on a busy machine) or for many polls (tests poll
-        # back to back)
-        resting = self.still >= P.DIRECTION_STILL_POLLS or (
-            self.still >= 2 and time.monotonic() - self.still_since >= P.DIRECTION_STILL_SECONDS)
-        moved = {k: wrap_delta(self.base[k], pos[k]) for k in pos} if self.base else {}
-        if moved and abs(moved[j]) >= P.DIRECTION_MIN_MOVE and all(abs(moved[j]) >= abs(v) for v in moved.values()):
-            self.signs[j] = 1 if moved[j] > 0 else -1
-            s.log(f"{j}: recorded ({'+' if moved[j] > 0 else '-'})")
-            self.base = None  # the next joint waits until this one is back and the arm rests again
-        elif resting:
-            self.base = None if self._at_stop(s, j, pos) else dict(pos)
-
-    def done(self, s):
-        return self.current is None
-
-    def end(self, s):
-        s.draft.directions = dict(self.signs)
-        checks = []
-        missing = [j for j in JOINTS if j not in self.signs]
-        if missing:
-            checks.append(K.Check("direction.incomplete", K.WARN, f"No direction recorded for {', '.join(missing)}.",
-                                  "Retry: move each joint at least ~15 degrees, then pause.",
-                                  args={"joints": ", ".join(missing)}))
-        other = "leader" if self.role == "follower" else "follower"
-        paired = s.ctx.store.latest_directions(other, exclude_arm=s.targets[self.role].arm_id)
-        if paired:
-            checks += K.check_directions(self.signs, paired[1], f"{other} '{paired[0]}'")
-        prev = s.previous[self.role]
-        prev_dirs = prev.data.get("directions") if prev else None
-        if prev_dirs:
-            checks += K.check_directions(self.signs, prev_dirs, "previous")
-        if not paired and not prev_dirs:
-            checks += K.check_directions(self.signs, None, "")
-        return checks
-
-    def progress(self, s):
-        if not self.base:
-            return {}
-        j = self.current
-        return {"joint": j, "prompt": P.DIRECTION_PROMPTS.get(j, "") if j else "", "signs": self.signs}
-
-
 class SaveStep(Step):
     kind, title = "save", "Write, save and activate"
     needs = ("offsets", "ranges")
@@ -485,19 +387,21 @@ class SaveStep(Step):
         arm.write_calibration(cal)
         checks += K.check_motor_matches(cal, arm.read_calibration())
         all_checks = [c.to_dict() for st in s.steps if st is not self for c in s.results.get(st.id, [])]
-        # A calibration that was pushed past failed checks is kept for reference but never auto-activated.
-        forced = any(c["status"] == K.FAIL for c in all_checks)
+        # Accepting a failed check ("f") is a decision: the version is activated like any other, and the
+        # failed checks stay in its record (history shows them).
+        forced = [c for c in all_checks if c["status"] == K.FAIL]
         rec = s.ctx.store.add(t.arm_id, self.role, cal, note=t.note, port=t.port or "",
                               usb_serial=s.ctx.list_ports().get(t.port or "", ""),
-                              checks=all_checks + [c.to_dict() for c in checks], directions=d.directions,
-                              activate=not forced)
+                              checks=all_checks + [c.to_dict() for c in checks], written=True)
         d.record = rec.version
         if forced:
-            checks.append(K.Check("save.stored", K.WARN, f"Saved as {t.arm_id} v{rec.version}, NOT activated: "
-                                  "earlier steps failed.", f"Fix the failures and recalibrate, or activate it "
-                                  f"anyway with `so101-cal activate {t.arm_id} {rec.version}`."))
-            return checks
-        checks.append(K.Check("save.stored", K.PASS, f"Saved as {t.arm_id} v{rec.version} (active)."))
+            names = ", ".join(sorted({c["joint"] or c["id"] for c in forced}))
+            checks.append(K.Check("save.forced", K.WARN, f"Saved as {t.arm_id} v{rec.version} (active), with "
+                                  f"accepted failures: {names}.", "Fine if you meant it; the teleop test shows "
+                                  "whether the arm works.", args={"arm": t.arm_id, "version": rec.version,
+                                                                  "names": names}))
+        else:
+            checks.append(K.Check("save.stored", K.PASS, f"Saved as {t.arm_id} v{rec.version} (active)."))
         if s.ctx.export:
             path = s.ctx.store.export(t.arm_id, rec.version, s.ctx.export_dir, legacy=s.ctx.legacy_export)
             checks.append(K.Check("save.exported", K.PASS, f"Exported to {path}"))
@@ -567,9 +471,10 @@ class TeleopStep(Step):
         self.last_target: dict[str, int] | None = None
 
     def instructions(self, s):
-        return (f"Hold the leader in the SAME pose as the follower, then press Start. The follower's torque "
-                f"turns on and it mirrors the leader for {s.ctx.teleop_seconds:.0f} s (or until Stop). Move "
-                "slowly through all joints. When it stops the follower goes limp: keep a hand near it.")
+        return (f"Fold both arms into the rest pose (lying on their stops), then press Start. A motor mounted "
+                f"the other way round shows up here, before any torque. Then the follower's torque turns on "
+                f"and it mirrors the leader for {s.ctx.teleop_seconds:.0f} s (or until Stop). Move slowly "
+                "through all joints. When it stops the follower goes limp: keep a hand near it.")
 
     def hint_spec(self, s):
         return ("hint.teleop", {}) if self.running(s) else ("hint.teleop.ready", {})
@@ -671,8 +576,7 @@ class Session:
     @classmethod
     def calibrate(cls, ctx: Context, target: Target) -> Session:
         r = target.role
-        steps = [PortStep(r), MotorsStep(r), PowerStep(r), HomingStep(r), RangesStep(r), DirectionStep(r),
-                 SaveStep(r)]
+        steps = [PortStep(r), MotorsStep(r), PowerStep(r), HomingStep(r), RangesStep(r), SaveStep(r)]
         return cls("calibrate", {r: target}, ctx, steps)
 
     @classmethod
@@ -937,7 +841,8 @@ class Session:
     def result(self) -> str:
         statuses = [self.states[s.id].status for s in self.steps]
         if K.FAIL in statuses:
-            return K.FAIL
+            # failures that were accepted ("f") and still ended in a saved version are warnings
+            return K.WARN if self.draft.record is not None and not self.aborted else K.FAIL
         if self.aborted:
             return "aborted"
         return K.WARN if K.WARN in statuses else K.PASS

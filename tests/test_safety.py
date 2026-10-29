@@ -169,7 +169,6 @@ def test_corrupt_or_dangling_store_files(store):
     calibrate(store, MockRig.create(), "follower", port_known=True)
     (store.root / "follower" / "v0001.json").unlink()
     assert store.active("follower") is None
-    assert store.latest_directions("follower") is None
     (store.root / "follower" / "arm.json").write_text('{"arm_id": "follo')
     with pytest.raises(StoreError, match="corrupt"):
         store.arm("follower")

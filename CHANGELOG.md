@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.4
+
+- No more "joint directions" step. It asked people to move each joint "up" or "left", which is ambiguous
+  (seen from where? from which pose?), gave different answers on every run and blocked saving. A motor
+  mounted the other way round is now found objectively: the teleop test starts with both arms folded in
+  the rest pose, where most joints lie on a stop, so a reversed one reads from the other end of its range
+  ("mirror images") and the test stops before any torque.
+- "Accept anyway" saves and activates the calibration; the accepted failures stay in its record. The run
+  ends as a warning, not as "Failed".
+- No offset warning for wrist_roll: it turns all the way, any horn angle works.
+- `activate` only says to write the motors when they may hold another version (the tool now remembers
+  which version it wrote).
+
 ## 0.1.3
 
 (0.1.2 was tagged but never published: a CI test failed on macOS.)

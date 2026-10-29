@@ -240,12 +240,6 @@ function progressHtml(c) {
       ambiguous: "More than one port disappeared." }[p.phase];
     return `<div class="callout">${msg}</div>`;
   }
-  if (p.joint !== undefined) {
-    const done = Object.keys(p.signs || {}).length;
-    if (!p.joint) return `<div class="callout">All joints recorded.</div>`;
-    return `<div class="callout">Now move <b>${esc(p.joint)}</b>: ${esc(p.prompt)}
-      <div class="meter" style="margin-top:8px"><i style="width:${(done / 6) * 100}%"></i></div></div>`;
-  }
   if (p.elapsed !== undefined) {
     return `<div class="callout">Teleoperating · ${p.elapsed.toFixed(0)} / ${p.seconds.toFixed(0)} s · ${p.samples} cycles
       <div class="meter" style="margin-top:8px"><i style="width:${Math.min(100, (p.elapsed / p.seconds) * 100)}%"></i></div></div>`;

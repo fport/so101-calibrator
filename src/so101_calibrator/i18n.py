@@ -20,7 +20,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "ago.now": "just now", "ago.min": "{n} min ago", "ago.h": "{n} h ago", "ago.d": "{n} d ago",
         "flow.calibrate": "Calibrate {role}", "flow.verify": "Verify {role}", "flow.teleop": "Teleop test",
         "step.port": "USB port", "step.motors": "Motors", "step.power": "Power", "step.homing": "Middle pose",
-        "step.ranges": "Ranges", "step.direction": "Directions", "step.save": "Save", "step.match": "Compare",
+        "step.ranges": "Ranges", "step.save": "Save", "step.match": "Compare",
         "step.pose": "Middle pose check", "step.teleop": "Teleop",
         "hint.port.ready": "Press ⏎, then *unplug* the {role}'s USB cable",
         "hint.port.unplug": "*Unplug* the {role}'s USB cable now",
@@ -31,37 +31,29 @@ STRINGS: dict[str, dict[str, str]] = {
         "hint.power": "The supply should be *{lo}–{hi} V*",
         "hint.homing": "Put every joint in the *middle*",
         "hint.ranges": "Move each joint to *both ends*",
-        "hint.direction.ready": "Move each joint *a little*, as shown",
-        "hint.direction": "{joint}: {prompt}",
-        "hint.direction.middle": "{joint}: bring it to the *middle* first",
         "hint.save": "*Save* the calibration",
         "hint.match": "Compare the motors with the *saved* calibration",
         "hint.pose": "Put the arm in the *middle* pose again",
-        "hint.teleop.ready": "Put both arms in the *same pose*",
+        "hint.teleop.ready": "Fold both arms into the *rest pose*",
         "hint.teleop": "Move the *leader* slowly",
         "sub.port": "Only this arm's board plugged in.",
         "sub.motors": "Motors 1–6 should answer.",
         "sub.power": "Follower 12 V, leader 5 V.",
         "sub.homing": "Upper arm and forearm at a right angle, gripper half open.",
         "sub.ranges": "Not wrist_roll, it turns all the way. Then back to the middle pose and ⏎.",
-        "sub.direction": "Start from the pose shown. Move only this joint, then pause.",
-        "check.direction.mismatch": "{joint}: moved the opposite way to the {ref}.",
-        "check.direction.mismatch.fix": "Either {joint} was moved the wrong way in this step, or its motor is mounted "
-        "reversed. Retry following the picture; if it happens again, compare the motor and horn on both arms. "
-        "Teleoperation would drive this joint backwards.",
-        "check.direction.incomplete": "No direction recorded for {joints}.",
-        "check.direction.incomplete.fix": "Retry: move each joint at least ~15 degrees, then pause.",
-        "ref.previous": "previous calibration",
+        "check.teleop.mirrored": "{joint}: leader reads {leader}, follower {follower}: mirror images.",
+        "check.teleop.mirrored.fix": "If both arms really are folded the same way, the {joint} motor (or its horn) is "
+        "mounted the other way round on one arm: re-assemble it like on the other arm. Teleoperation would drive "
+        "this joint backwards.",
+        "check.teleop.aligned": "Leader and follower poses differ: {joints}.",
+        "check.teleop.aligned.fix": "Fold both arms into the rest pose before starting: the follower jumps to the "
+        "leader's pose as soon as torque is on.",
+        "check.save.forced": "Saved as {arm} v{version} (active), with accepted failures: {names}.",
+        "check.save.forced.fix": "Fine if you meant it; the teleop test shows whether the arm works.",
         "sub.save": "Written to the motors and exported for LeRobot.",
         "sub.match": "",
         "sub.pose": "Each joint should read about 2047.",
-        "sub.teleop": "The follower mirrors it. Keep a hand near it.",
-        "joint.shoulder_pan": "turn the arm *left, seen from behind*",
-        "joint.shoulder_lift": "lift the upper arm *up*",
-        "joint.elbow_flex": "*unfold* the elbow",
-        "joint.wrist_flex": "tilt the wrist *up*",
-        "joint.wrist_roll": "roll the wrist *clockwise*",
-        "joint.gripper": "*open* the gripper",
+        "sub.teleop": "Lying on their stops. Then the follower mirrors the leader; keep a hand near it.",
         "key.start": "start", "key.stop": "done", "key.accept": "continue", "key.retry": "retry",
         "key.force": "accept anyway", "key.abort": "cancel", "key.abort_again": "press again to cancel",
         "key.joints": "joints", "key.details": "details", "key.ask": "assistant", "key.done": "done",
@@ -88,7 +80,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "ago.now": "az önce", "ago.min": "{n} dk önce", "ago.h": "{n} sa önce", "ago.d": "{n} gün önce",
         "flow.calibrate": "{role} kalibrasyonu", "flow.verify": "{role} doğrulama", "flow.teleop": "Teleop testi",
         "step.port": "USB portu", "step.motors": "Motorlar", "step.power": "Besleme", "step.homing": "Orta poz",
-        "step.ranges": "Aralıklar", "step.direction": "Yönler", "step.save": "Kaydet", "step.match": "Karşılaştır",
+        "step.ranges": "Aralıklar", "step.save": "Kaydet", "step.match": "Karşılaştır",
         "step.pose": "Orta poz kontrolü", "step.teleop": "Teleop",
         "hint.port.ready": "⏎'a bas, sonra {role} USB kablosunu *çıkar*",
         "hint.port.unplug": "{role} USB kablosunu şimdi *çıkar*",
@@ -99,36 +91,28 @@ STRINGS: dict[str, dict[str, str]] = {
         "hint.power": "Besleme *{lo}–{hi} V* olmalı",
         "hint.homing": "Her eklemi *ortaya* getir",
         "hint.ranges": "Her eklemi *iki ucuna* götür",
-        "hint.direction.ready": "Her eklemi gösterildiği gibi *biraz* oynat",
-        "hint.direction": "{joint}: {prompt}",
-        "hint.direction.middle": "{joint}: önce *ortaya* getir",
         "hint.save": "Kalibrasyonu *kaydet*",
         "hint.match": "Motorları *kayıtlı* kalibrasyonla karşılaştır",
         "hint.pose": "Kolu yine *orta* poza getir",
-        "hint.teleop.ready": "İki kolu *aynı poza* getir",
+        "hint.teleop.ready": "İki kolu da *dinlenme duruşuna* katla",
         "hint.teleop": "*Leader*'ı yavaşça oynat",
         "sub.port": "Sadece bu kolun kartı takılı olsun.",
         "sub.motors": "1–6 numaralı motorlar cevap vermeli.",
         "sub.power": "Follower 12 V, leader 5 V.",
         "sub.homing": "Üst kol ile ön kol dik açı, gripper yarı açık.",
         "sub.ranges": "wrist_roll hariç, o tam tur döner. Bitince kolu dik açılı orta duruşa getir ve ⏎.",
-        "sub.direction": "Resimdeki duruştan başla. Sadece bu eklemi oynat, sonra bir an bekle.",
-        "check.direction.mismatch": "{joint}: {ref} ile ters yönde oynadı.",
-        "check.direction.mismatch.fix": "Ya {joint} bu adımda ters yöne oynatıldı ya da motoru ters takılı. Resme "
-        "bakarak tekrar dene; yine çıkarsa iki koldaki motoru ve horn'u karşılaştır. Teleop bu eklemi ters yöne sürer.",
-        "check.direction.incomplete": "{joints} için yön ölçülmedi.",
-        "check.direction.incomplete.fix": "Tekrar dene: her eklemi en az ~15 derece oynat, sonra bir an bekle.",
-        "ref.previous": "önceki kalibrasyon",
+        "check.teleop.mirrored": "{joint}: leader {leader}, follower {follower} okuyor: birbirinin tersi.",
+        "check.teleop.mirrored.fix": "İki kol gerçekten aynı şekilde katlıysa {joint} motoru (ya da horn'u) bir kolda "
+        "ters takılı: diğer koldaki gibi yeniden monte et. Teleop bu eklemi ters yöne sürer.",
+        "check.teleop.aligned": "Leader ve follower farklı duruşta: {joints}.",
+        "check.teleop.aligned.fix": "Başlamadan iki kolu da dinlenme duruşuna katla: tork açılınca follower hemen "
+        "leader'ın duruşuna gider.",
+        "check.save.forced": "{arm} v{version} olarak kaydedildi ve aktif; kabul edilen hatalar: {names}.",
+        "check.save.forced.fix": "Bilerek kabul ettiysen sorun yok; kolun çalışıp çalışmadığını teleop testi gösterir.",
         "sub.save": "Motorlara yazılır ve LeRobot için dışa aktarılır.",
         "sub.match": "",
         "sub.pose": "Her eklem yaklaşık 2047 okumalı.",
-        "sub.teleop": "Follower onu taklit eder. Elin yakında olsun.",
-        "joint.shoulder_pan": "kolu *arkasından bakınca sola* çevir",
-        "joint.shoulder_lift": "üst kolu *yukarı* kaldır",
-        "joint.elbow_flex": "dirseği *aç*",
-        "joint.wrist_flex": "bileği *yukarı* eğ",
-        "joint.wrist_roll": "bileği *saat yönünde* çevir",
-        "joint.gripper": "gripper'ı *aç*",
+        "sub.teleop": "Dayanaklarına yaslı. Sonra follower leader'ı taklit eder; elin yakında olsun.",
         "key.start": "başla", "key.stop": "bitti", "key.accept": "devam", "key.retry": "tekrar",
         "key.force": "yine de kabul", "key.abort": "iptal", "key.abort_again": "iptal için tekrar bas",
         "key.joints": "eklemler", "key.details": "detay", "key.ask": "asistan", "key.done": "bitti",
@@ -188,13 +172,9 @@ def check_text(check: dict, lang: str | None = None) -> tuple[str, str]:
     key, args = f"check.{check['id']}", check.get("args")
     if args is None or key not in STRINGS["en"]:
         return check["message"], check.get("fix", "")
-    if args.get("ref") == "previous":
-        args = {**args, "ref": t("ref.previous", lang)}
     return t(key, lang, **args), t(f"{key}.fix", lang, **args)
 
 
 def hint(key: str, args: dict, lang: str | None = None) -> str:
-    """A step hint (see wizard.Step.hint_spec); a "joint" argument brings its localized prompt."""
-    if "joint" in args:
-        args = {**args, "prompt": t(f"joint.{args['joint']}", lang)}
+    """A step hint (see wizard.Step.hint_spec)."""
     return t(key, lang, **args)

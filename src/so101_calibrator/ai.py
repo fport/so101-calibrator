@@ -36,10 +36,10 @@ elbow_flex, wrist_flex, wrist_roll, gripper; follower on a 12 V supply, leader o
 
 Calibration steps: find the USB port (unplug/replug), scan motor ids 1-6 at 1 Mbps, check supply voltage,
 middle pose (homing offset = position - 2047, so every joint reads ~2047 in the middle pose), record ranges
-of motion (move every joint except wrist_roll to both mechanical stops), record joint directions (compared
-with the paired arm to catch a motor or horn mounted backwards), save (write to EEPROM, store a version,
-export to the LeRobot cache). Verify checks the EEPROM and the middle pose; the teleop test mirrors
-leader -> follower and measures tracking error.
+of motion (move every joint except wrist_roll to both mechanical stops), save (write to EEPROM, store a
+version, export to the LeRobot cache). Verify checks the EEPROM and the middle pose. The teleop test starts
+with both arms folded in the rest pose (a joint whose values are mirror images then has a motor or horn
+mounted backwards on one arm), mirrors leader -> follower and measures tracking error.
 
 You get the tool's current state as JSON. Answer the user's question about it.
 - Be brief: at most 5 short lines or bullets. Concrete physical actions first ("unplug...", "move...").

@@ -135,6 +135,6 @@ def _live(session: Session, step_id: str, keys: Keys | None, yes: bool, actor) -
             session.act("stop", step_id)
         elif keys is None:
             time.sleep(0.03)
-            mock_done = actor is not None and actor.idle() and kind in ("ranges", "direction")
+            mock_done = actor is not None and actor.idle() and kind == "ranges"
             if mock_done or time.monotonic() > t_end:
                 session.act("stop", step_id)

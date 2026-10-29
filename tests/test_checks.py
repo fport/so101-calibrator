@@ -81,14 +81,6 @@ def test_ranges_drift_vs_previous():
     assert ("ranges.drift", "warn") in statuses(checks)
 
 
-def test_directions():
-    signs = {j: 1 for j in JOINTS}
-    assert K.worst(K.check_directions(signs, None, "")) == "pass"
-    assert K.worst(K.check_directions(signs, signs, "leader")) == "pass"
-    bad = K.check_directions(signs, signs | {"elbow_flex": -1}, "leader 'leader'")
-    assert bad[0].status == "fail" and bad[0].joint == "elbow_flex"
-
-
 def test_motor_match_and_pose():
     cal = from_json_dict(SAMPLE)
     other = from_json_dict(SAMPLE)
@@ -104,6 +96,11 @@ def test_teleop_checks():
     zero = {j: 0.0 for j in JOINTS}
     assert K.worst(K.check_teleop_start(zero, zero)) == "pass"
     assert K.worst(K.check_teleop_start(zero | {"shoulder_lift": 60.0}, zero)) == "fail"
+    rest = zero | {"shoulder_lift": -95.0, "elbow_flex": 95.0}
+    mirrored = K.check_teleop_start(rest, rest | {"elbow_flex": -90.0})
+    assert [(c.id, c.joint) for c in mirrored] == [("teleop.mirrored", "elbow_flex")]
+    # far apart on the same side is a pose difference, not a reversed motor
+    assert K.check_teleop_start(rest, rest | {"elbow_flex": 40.0})[0].id == "teleop.aligned"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 2.0}, 100)) == "pass"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 30.0}, 100)) == "fail"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 2.0}, 3)) == "fail"

@@ -153,8 +153,9 @@ class Store:
             return None
 
     def add(self, arm_id: str, role: str, cal: C.Calibration, *, note: str = "", port: str = "",
-            usb_serial: str = "", checks: list[dict] | None = None, directions: dict | None = None,
-            source: str = "wizard", activate: bool = True) -> Record:
+            usb_serial: str = "", checks: list[dict] | None = None, source: str = "wizard",
+            activate: bool = True, written: bool = False) -> Record:
+        """`written`: this calibration is also what the motors now hold."""
         if role not in PROFILES:
             raise StoreError(f"unknown role '{role}'")
         info = self.arm(arm_id) or {"arm_id": arm_id, "role": role, "usb_serial": usb_serial, "active": None}
@@ -175,7 +176,6 @@ class Store:
             "parent": info.get("active"),
             "tool": f"so101-calibrator {__version__}",
             "checks": checks or [],
-            "directions": directions or {},
             "calibration": C.to_json_dict(cal),
         }
         _write_json(self._arm_dir(arm_id) / f"v{version:04d}.json", record)
@@ -185,8 +185,20 @@ class Store:
             info["usb_serial"] = usb_serial
         if activate:
             info["active"] = version
+        if written:
+            info["in_motors"] = version
         self._write_arm(arm_id, info)
         return Record(record)
+
+    def mark_written(self, arm_id: str, version: int) -> None:
+        """Remember which version the motors hold (see `in_motors`)."""
+        info = self.arm(arm_id)
+        info["in_motors"] = version
+        self._write_arm(arm_id, info)
+
+    def in_motors(self, arm_id: str) -> int | None:
+        """The version last written to this arm's motors by this tool, if known."""
+        return (self.arm(arm_id) or {}).get("in_motors")
 
     def activate(self, arm_id: str, version: int) -> Record:
         rec = self.get(arm_id, version)
@@ -204,18 +216,6 @@ class Store:
     def diff(self, arm_id: str, a: int, b: int | None = None) -> list[dict]:
         return C.diff(self.get(arm_id, a).calibration, self.get(arm_id, b).calibration)
 
-    def latest_directions(self, role: str, exclude_arm: str | None = None) -> tuple[str, dict] | None:
-        """Directions of the most recent active calibration of another arm with this role."""
-        best = None
-        for info in self.arms():
-            if info["role"] != role or info["arm_id"] == exclude_arm or not info.get("active"):
-                continue
-            rec = self.active(info["arm_id"])
-            if rec and rec.data.get("directions") and (best is None or rec.data["created"] > best[0]):
-                best = (rec.data["created"], info["arm_id"], rec.data["directions"])
-        return (best[1], best[2]) if best else None
-
-    # --- import / export ----------------------------------------------------------------------------
     def import_file(self, path: str | Path, arm_id: str, role: str, note: str = "") -> Record:
         cal = C.load(path)
         problems = C.validate_shape(cal)

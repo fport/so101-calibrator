@@ -123,8 +123,9 @@ def cmd_activate(args, env: Env) -> int:
     if not args.no_export:
         path = env.store.export(args.id, rec.version, args.calibration_dir, legacy=args.legacy_export)
         print(f"exported to {path}")
-    print(f"{DIM}The motors still hold the old values until you run: so101-cal write {args.id} "
-          f"or connect with LeRobot and answer ENTER (use file).{RESET}")
+    if env.store.in_motors(args.id) != rec.version:
+        print(f"{DIM}The motors may hold another version: run so101-cal write {args.id}, or connect with "
+              f"LeRobot and answer ENTER (use file).{RESET}")
     return 0
 
 
@@ -170,6 +171,8 @@ def cmd_write(args, env: Env) -> int:
         arm.set_torque(False)
         arm.write_calibration(rec.calibration)
         checks = K.check_motor_matches(rec.calibration, arm.read_calibration())
+        if K.worst(checks) != K.FAIL:
+            env.store.mark_written(args.id, rec.version)
     finally:
         arm.release()
     print_checks(checks)
