@@ -63,6 +63,8 @@ class MockArm:
         self.voltage = voltage if voltage is not None else (12.1 if role == "follower" else 5.0)
         # Where the encoder sits when the arm is in its middle pose: random per assembly, like real motors.
         self.mid_actual = {j: rng.randint(900, 3200) for j in JOINTS}
+        # wrist horns go on at about the same angle on every arm, so leader and follower match
+        self.mid_actual["wrist_roll"] = 1030 + rng.randint(-60, 60)
         self.half_span = dict(DEFAULT_HALF_SPANS)
         for j in self.faults.stuck:
             self.half_span[j] = 150

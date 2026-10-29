@@ -129,6 +129,17 @@ class Store:
             out.append(info)
         return out
 
+    def latest_active(self, role: str, exclude_arm: str | None = None) -> Record | None:
+        """The newest active calibration of an arm with this role (e.g. the follower paired with a leader)."""
+        best = None
+        for info in self.arms():
+            if info.get("role") != role or info.get("arm_id") == exclude_arm:
+                continue
+            rec = self.active(info["arm_id"])
+            if rec and (best is None or rec.data["created"] > best.data["created"]):
+                best = rec
+        return best
+
     # --- versions -----------------------------------------------------------------------------------
     def versions(self, arm_id: str) -> list[Record]:
         d = self._arm_dir(arm_id)

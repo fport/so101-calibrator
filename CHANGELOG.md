@@ -9,6 +9,11 @@
   - the follower starts slowly (~9 deg/s, ramping up over 2 s) and never moves faster than ~90 deg/s,
     measured per second so a faster control loop (30, 60 Hz) does not make it faster;
   - torque is limited during the test (35-70 % per joint) and restored afterwards.
+- The middle pose now says how to turn the wrist (moving jaw, on the leader the trigger, on top), and
+  calibrating an arm whose wrist was turned differently from the other arm's warns: that difference is
+  exactly how far teleoperation would turn the follower's wrist.
+- The teleop test stops if the leader's wrist turns past the end of its turn, instead of letting the
+  follower spin its wrist the other way round.
 
 - The teleop test no longer stops at eight check screens waiting for Enter: checks that need nothing from
   you (remembered port, motors, voltage, stored calibration) run by themselves and only stop on a problem.

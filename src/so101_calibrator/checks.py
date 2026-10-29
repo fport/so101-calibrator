@@ -123,8 +123,13 @@ def check_power(voltages: dict[str, float], temps: dict[str, int], prof: RolePro
 
 
 # --- homing ----------------------------------------------------------------------------------------
-def check_homing(offsets: dict[str, int], readback: dict[str, int],
-                 previous: Calibration | None) -> list[Check]:
+def _wrap(d: int) -> int:
+    return (d + HALF_TURN + 1) % (MAX_POS + 1) - (HALF_TURN + 1)
+
+
+def check_homing(offsets: dict[str, int], readback: dict[str, int], previous: Calibration | None,
+                 paired: tuple[str, Calibration] | None = None) -> list[Check]:
+    """`paired`: (label, active calibration) of the other arm, e.g. ("follower 'follower'", cal)."""
     checks = []
     for j in JOINTS:
         off = offsets[j]
@@ -141,13 +146,26 @@ def check_homing(offsets: dict[str, int], readback: dict[str, int],
                                 f"{HALF_TURN}.", "The offset was not written. Keep the arm still during this "
                                 "step and retry; if it repeats, check that the motor's EEPROM lock is released "
                                 "(torque off).", j))
-        if previous and j in previous and j not in FULL_TURN_JOINTS:
-            drift = off - previous[j].homing_offset
+        if previous and j in previous:
+            drift = _wrap(off - previous[j].homing_offset)
             if abs(drift) > P.DRIFT_OFFSET_WARN:
                 checks.append(Check("homing.drift", WARN, f"{j}: offset moved {drift:+d} ticks "
                                     f"(~{drift * 360 / 4096:+.0f} deg) since the previous calibration.",
                                     "Either the middle pose differs from last time or the motor/horn was "
                                     "re-seated. Redo the middle pose if that was not intended.", j))
+    if paired and "wrist_roll" in paired[1]:
+        # Leader and follower wrists are built alike, so their middle-pose offsets come out alike when both
+        # wrists are turned the same way. Turned differently, teleoperation spins the follower's wrist by
+        # the difference (this cracked a wrist housing once).
+        label, other = paired
+        d = _wrap(offsets["wrist_roll"] - other["wrist_roll"].homing_offset)
+        if abs(d) > P.WRIST_PAIR_WARN:
+            deg = f"{abs(d) * 360 / 4096:.0f}"
+            checks.append(Check("homing.wrist", WARN, f"wrist_roll: turned ~{deg} degrees differently from the "
+                                f"{label} in its middle pose.", "In the middle pose the moving jaw (on the leader: "
+                                "the trigger) is on top, on both arms. Turn the wrist that way and retry, or "
+                                "teleoperation turns the follower's wrist that far.", "wrist_roll",
+                                args={"deg": deg, "other": label}))
     if not any(c.status != PASS for c in checks):
         checks.insert(0, _ok("homing.offset", "Middle pose stored; all joints read 2047."))
     return checks

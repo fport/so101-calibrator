@@ -276,3 +276,40 @@ def test_teleop_follower_speed_is_capped_per_second_at_any_loop_rate(store, hz):
     s.abort()
     assert bus.regs[3]["Torque_Limit"] == 1000 and bus.regs[6]["Torque_Limit"] == 500
     assert not bus.regs[3]["Torque_Enable"]
+
+
+def test_wrists_turned_differently_at_homing_are_flagged(store):
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    s = Session.calibrate(make_ctx(store, rig), Target("follower", "follower", port=rig.FOLLOWER_PORT))
+    drive(s, rig, until="homing")
+    MockHand(rig.follower).middle()
+    rig.follower.set_pose("wrist_roll", 0.55)  # ~100 degrees turned compared with the leader's middle pose
+    s.start()
+    warned = [c for c in s.results["homing"] if c.id == "homing.wrist"]
+    assert s.state.status == "warn" and warned and warned[0].joint == "wrist_roll"
+    s.retry()
+    MockHand(rig.follower).middle()  # turned the right way: no warning
+    s.start()
+    assert not [c for c in s.results["homing"] if c.id == "homing.wrist"]
+
+
+def test_teleop_stops_when_the_leader_wrist_wraps_around(store):
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    calibrate(store, rig, "follower")
+    targets = (Target("leader", "leader", rig.LEADER_PORT), Target("follower", "follower", rig.FOLLOWER_PORT))
+    s = Session.teleop(make_ctx(store, rig, teleop_seconds=60), *targets)
+    drive(s, rig, until="teleop")
+    MockHand(rig.leader).rest()
+    MockHand(rig.follower).rest()
+    s.start()
+    assert s.state.status == "running"
+    rig.leader.set_pose("wrist_roll", 0.95)  # just short of the end of the turn (reads ~4000)
+    s.ctx.clock.advance(0.04)
+    s.poll()
+    rig.leader.set_pose("wrist_roll", -0.95)  # past the end of the turn: reads ~100
+    s.ctx.clock.advance(0.04)
+    s.poll()
+    assert s.state.status == "fail" and [c.id for c in failing(s)] == ["teleop.wrist_wrap"]
+    assert not rig.bus(rig.FOLLOWER_PORT).regs[5]["Torque_Enable"]

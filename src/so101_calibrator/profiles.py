@@ -86,6 +86,7 @@ OFFSET_WARN = 1900  # |homing_offset| this close to the +-2047 encodable limit i
 HOMING_READBACK_TOL = 20  # after homing the middle pose must read HALF_TURN within this
 CENTER_WARN = 700  # middle of the recorded range this far from HALF_TURN: homing pose was off-centre
 EDGE_MARGIN = 20  # range touching 0 / 4095 means the joint crossed the encoder wrap
+WRIST_PAIR_WARN = 700  # wrist_roll offsets of leader and follower this far apart (~60 deg): turned differently
 DRIFT_OFFSET_WARN = 150  # homing offset change vs. the previous calibration (~13 degrees)
 DRIFT_SPAN_WARN = 0.15  # relative span change vs. the previous calibration
 TEMP_WARN_C = 55

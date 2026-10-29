@@ -40,7 +40,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "sub.port": "Only this arm's board plugged in.",
         "sub.motors": "Motors 1–6 should answer.",
         "sub.power": "Follower 12 V, leader 5 V.",
-        "sub.homing": "Upper arm and forearm at a right angle, gripper half open.",
+        "sub.homing": "Upper arm and forearm at a right angle; moving jaw (leader: trigger) on top; gripper half open.",
+        "check.teleop.wrist_wrap": "Stopped: the leader's wrist turned more than half a turn from its middle pose, so "
+        "the follower would have spun its wrist the other way round.",
+        "check.teleop.wrist_wrap.fix": "Turn the leader's wrist back. If this happens in normal use, recalibrate both "
+        "arms with the wrists turned the same way in the middle pose (moving jaw / trigger on top).",
+        "check.homing.wrist": "wrist_roll: turned ~{deg} degrees differently from the {other} in its middle pose.",
+        "check.homing.wrist.fix": "In the middle pose the moving jaw (on the leader: the trigger) is on top, on both "
+        "arms. Turn the wrist that way and retry, or teleoperation turns the follower's wrist that far.",
         "sub.ranges": "Not wrist_roll, it turns all the way. Then back to the middle pose and ⏎.",
         "check.teleop.mirrored": "{joint}: leader reads {leader}, follower {follower}: mirror images.",
         "check.teleop.mirrored.fix": "If both arms really are folded the same way, the {joint} motor (or its horn) is "
@@ -101,7 +108,14 @@ STRINGS: dict[str, dict[str, str]] = {
         "sub.port": "Sadece bu kolun kartı takılı olsun.",
         "sub.motors": "1–6 numaralı motorlar cevap vermeli.",
         "sub.power": "Follower 12 V, leader 5 V.",
-        "sub.homing": "Üst kol ile ön kol dik açı, gripper yarı açık.",
+        "sub.homing": "Üst kol ile ön kol dik açı; hareketli çene (leader'da tetik) üstte; gripper yarı açık.",
+        "check.teleop.wrist_wrap": "Durduruldu: leader'ın bileği orta duruştan yarım turdan fazla döndü; follower "
+        "bileğini ters yönden tam tur döndürecekti.",
+        "check.teleop.wrist_wrap.fix": "Leader'ın bileğini geri çevir. Normal kullanımda da oluyorsa iki kolu orta "
+        "duruşta bilekleri aynı yöne dönük (hareketli çene / tetik üstte) olacak şekilde yeniden kalibre et.",
+        "check.homing.wrist": "wrist_roll: orta duruşta {other} koluna göre ~{deg} derece farklı çevrilmiş.",
+        "check.homing.wrist.fix": "Orta duruşta iki kolda da hareketli çene (leader'da tetik) üstte olmalı. Bileği "
+        "öyle çevirip tekrar dene; yoksa teleop follower'ın bileğini bu kadar çevirir.",
         "sub.ranges": "wrist_roll hariç, o tam tur döner. Bitince kolu dik açılı orta duruşa getir ve ⏎.",
         "check.teleop.mirrored": "{joint}: leader {leader}, follower {follower} okuyor: birbirinin tersi.",
         "check.teleop.mirrored.fix": "İki kol gerçekten aynı şekilde katlıysa {joint} motoru (ya da horn'u) bir kolda "
