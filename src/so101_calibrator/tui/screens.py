@@ -12,7 +12,7 @@ from textual.containers import Center, Vertical
 from textual.screen import Screen
 from textual.widgets import DataTable, Static
 
-from ..i18n import check_text, hint, t
+from ..i18n import STRINGS, check_text, hint, t
 from ..store import StoreError, tilde
 from .widgets import THEME, AIPanel, Sprite, ago, emphasis, joints_text, keys
 
@@ -246,7 +246,9 @@ class RunScreen(AppScreen):
             line = emphasis(hint(cur["hint_key"], cur["hint_args"]), f"bold {THEME.fg}")
             line.justify = "center"
         self.query_one("#hint", Static).update(line)
-        self.query_one("#sub", Static).update(Text(t(f"sub.{cur['kind']}"), style=THEME.dim, justify="center"))
+        sub_key = "sub." + cur["hint_key"].removeprefix("hint.")  # e.g. a remembered port has its own line
+        sub_key = sub_key if sub_key in STRINGS["en"] else f"sub.{cur['kind']}"
+        self.query_one("#sub", Static).update(Text(t(sub_key), style=THEME.dim, justify="center"))
         self.query_one("#meter", Static).update(self._meter(cur))
         self.query_one("#checks", Static).update(self._checks([s for s in snap["steps"] if s["id"] == cur["id"]]))
         details = self.query_one("#details", Static)

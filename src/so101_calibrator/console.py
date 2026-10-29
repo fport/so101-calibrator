@@ -70,7 +70,7 @@ def run_session(session: Session, yes: bool = False, force: bool = False, actor=
                 print(f"\n{BOLD}[{n}/{total}] {cur['label']}{RESET}")
                 print(f"  {cur['instructions']}")
             if status == "ready":
-                if not yes:
+                if not yes and not cur["auto"]:  # checks that need nothing from the person just run
                     extra = " (ENTER again to stop)" if cur["live"] else ""
                     print(f"  {DIM}Press ENTER to start{extra}, 'a' to abort.{RESET}", flush=True)
                     if _key(keys) in ("a", "eof"):

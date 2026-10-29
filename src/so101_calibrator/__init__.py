@@ -1,3 +1,3 @@
 """Step-by-step, checked and versioned calibration for SO-101 arms."""
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"

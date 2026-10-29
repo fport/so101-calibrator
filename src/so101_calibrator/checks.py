@@ -246,6 +246,13 @@ def check_teleop_start(leader: dict[str, float], follower: dict[str, float]) -> 
                             "is mounted the other way round on one arm: re-assemble it like on the other arm. "
                             "Teleoperation would drive this joint backwards.", j,
                             args={"joint": j, "leader": f"{lv:+.0f}", "follower": f"{fv:+.0f}"}))
+    if "gripper" in far:  # the rest pose says nothing about the leader's trigger: it has to be matched by hand
+        lv, fv = far.pop("gripper")
+        checks.append(Check("teleop.gripper", FAIL,
+                            f"Gripper: leader {lv:.0f}, follower {fv:.0f} (0 closed, 100 open).",
+                            "Hold the leader's trigger so its gripper matches the follower's (usually: squeeze it "
+                            "closed), then retry. If no position matches, one gripper motor is mounted the other "
+                            "way round.", "gripper", args={"leader": f"{lv:.0f}", "follower": f"{fv:.0f}"}))
     if far:
         desc = ", ".join(f"{j} ({lv - fv:+.0f})" for j, (lv, fv) in far.items())
         checks.append(Check("teleop.aligned", FAIL, f"Leader and follower poses differ: {desc}.",

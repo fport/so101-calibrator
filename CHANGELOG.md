@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5
+
+- The teleop test no longer stops at eight check screens waiting for Enter: checks that need nothing from
+  you (remembered port, motors, voltage, stored calibration) run by themselves and only stop on a problem.
+- A gripper that differs at the start gets its own message: the rest pose cannot set the leader's trigger,
+  so squeeze it closed like the follower's gripper.
+
 ## 0.1.4
 
 - No more "joint directions" step. It asked people to move each joint "up" or "left", which is ambiguous

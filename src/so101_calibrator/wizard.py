@@ -141,6 +141,11 @@ class Step:
         """What to do now, as an i18n key and its arguments (front ends render it in their language)."""
         return f"hint.{self.kind}", {}
 
+    def auto(self, s: Session) -> bool:
+        """Runs by itself as soon as it is ready: a check that needs nothing from the person. It still
+        stops the run when it does not pass."""
+        return False
+
     def hint(self, s: Session) -> str:
         """The hint in plain English (CLI, dashboard, AI prompt)."""
         return i18n.plain(i18n.hint(*self.hint_spec(s), lang="en"))
@@ -190,10 +195,13 @@ class PortStep(Step):
         return (f"Plug in ONLY the {self.role}'s USB cable and power. Press Start, then unplug the {self.role}'s "
                 "USB cable. Plug it back in when asked. The port is detected automatically.")
 
+    def auto(self, s):
+        return not self.is_live(s)  # a remembered port is only checked
+
     def hint_spec(self, s):
         port = s.targets[self.role].port
         if port and self.phase == "idle":
-            return "hint.port.known", {"port": port}
+            return "hint.port.known", {"port": port, "role": self.role}
         phase = self.phase if self.phase in ("unplug", "replug", "ambiguous") else "ready"
         return f"hint.port.{phase}", {"role": self.role}
 
@@ -243,6 +251,9 @@ class PortStep(Step):
 class MotorsStep(Step):
     kind, title = "motors", "Connect and scan motors"
 
+    def auto(self, s):
+        return True
+
     def instructions(self, s):
         return (f"Connects to {s.targets[self.role].port} at 1 Mbps and looks for motor ids 1-6 "
                 f"({', '.join(JOINTS)}). The {self.role}'s power supply must be on.")
@@ -276,6 +287,9 @@ class MotorsStep(Step):
 
 class PowerStep(Step):
     kind, title = "power", "Check supply voltage"
+
+    def auto(self, s):
+        return True
 
     def instructions(self, s):
         prof = s.profile(self.role)
@@ -410,6 +424,9 @@ class SaveStep(Step):
 
 class MatchStep(Step):
     kind, title = "match", "Compare motors with the active version"
+
+    def auto(self, s):
+        return True
 
     def instructions(self, s):
         return "Reads offsets and limits from the motors and compares them with the active stored version."
@@ -766,6 +783,9 @@ class Session:
                     self.log(f"{role}: {e}", "error")
                     if running and st is not None and role in st.roles:
                         lost = e
+            if st is not None and state is not None and state.status == "ready" and not self.aborted and st.auto(self):
+                self.start()
+                return
             if not running or st is None:
                 return
             if lost is not None:  # e.g. the leader unplugged mid-teleop: never keep the follower driven
@@ -794,6 +814,7 @@ class Session:
                 hint_key, hint_args = st.hint_spec(self)
                 current = {
                     "id": st.id, "kind": st.kind, "role": st.role, "label": st.label, "live": st.is_live(self),
+                    "auto": st.auto(self),
                     "status": status, "instructions": st.instructions(self), "hint": st.hint(self),
                     "hint_key": hint_key, "hint_args": hint_args, "progress": st.progress(self),
                     "illustration": st.illustration(self), "can": can,

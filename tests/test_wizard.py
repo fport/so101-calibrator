@@ -198,3 +198,27 @@ def test_teleop_start_checks_in_turkish():
     assert msg == "elbow_flex: leader +95, follower -93 okuyor: birbirinin tersi." and "ters takılı" in fix
     old = {"id": "teleop.mirrored", "status": "fail", "message": "old text", "fix": "old fix"}
     assert check_text(old, "tr") == ("old text", "old fix")  # records saved before translations
+
+
+def test_teleop_checks_run_by_themselves_up_to_the_test(store):
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    calibrate(store, rig, "follower")
+    targets = (Target("leader", "leader", rig.LEADER_PORT), Target("follower", "follower", rig.FOLLOWER_PORT))
+    s = Session.teleop(make_ctx(store, rig), *targets)
+    for _ in range(20):  # what the controller's poll thread does; nobody presses anything
+        s.poll()
+    assert s.step.kind == "teleop" and s.state.status == "ready"  # the test itself waits for the person
+    assert all(st["status"] == "pass" for st in s.snapshot()["steps"][:-1])
+
+
+def test_a_failing_automatic_check_stops_the_run(store):
+    rig = MockRig.create()
+    calibrate(store, rig, "leader")
+    calibrate(store, rig, "follower")
+    rig.ports.unplug(rig.FOLLOWER_PORT)
+    targets = (Target("leader", "leader", rig.LEADER_PORT), Target("follower", "follower", rig.FOLLOWER_PORT))
+    s = Session.teleop(make_ctx(store, rig), *targets)
+    for _ in range(20):
+        s.poll()
+    assert s.step.id == "port:follower" and s.state.status == "fail"
