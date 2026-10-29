@@ -4,8 +4,8 @@
 
 - The teleop test no longer stops at eight check screens waiting for Enter: checks that need nothing from
   you (remembered port, motors, voltage, stored calibration) run by themselves and only stop on a problem.
-- A gripper that differs at the start gets its own message: the rest pose cannot set the leader's trigger,
-  so squeeze it closed like the follower's gripper.
+- The gripper no longer has to match at the start: the leader's trigger rests open while the follower's
+  gripper rests closed, and the follower's gripper simply follows the trigger once the test runs.
 
 ## 0.1.4
 

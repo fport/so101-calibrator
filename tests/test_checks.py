@@ -101,9 +101,8 @@ def test_teleop_checks():
     assert [(c.id, c.joint) for c in mirrored] == [("teleop.mirrored", "elbow_flex")]
     # far apart on the same side is a pose difference, not a reversed motor
     assert K.check_teleop_start(rest, rest | {"elbow_flex": 40.0})[0].id == "teleop.aligned"
-    # the leader's trigger rests open while the follower's gripper rests closed: its own message
-    grip = K.check_teleop_start(rest | {"gripper": 97.0}, rest | {"gripper": 0.0})
-    assert [(c.id, c.joint) for c in grip] == [("teleop.gripper", "gripper")]
+    # the leader's trigger rests open while the follower's gripper rests closed: not a reason to refuse
+    assert K.worst(K.check_teleop_start(rest | {"gripper": 97.0}, rest | {"gripper": 0.0})) == "pass"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 2.0}, 100)) == "pass"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 30.0}, 100)) == "fail"
     assert K.worst(K.check_teleop_tracking({"elbow_flex": 2.0}, 3)) == "fail"
