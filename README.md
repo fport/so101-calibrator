@@ -25,6 +25,7 @@ For <a href="https://github.com/huggingface/lerobot">LeRobot</a>. In the termina
 uv tool install so101-calibrator     # or: pipx install so101-calibrator / pip install so101-calibrator
 so101-cal --mock                     # try it on a simulated arm
 so101-cal                            # then with your arms plugged in
+uv tool upgrade so101-calibrator     # later, to update (or: pipx upgrade / pip install -U)
 ```
 
 Pick **Follower**, then **Leader**, then **Test both arms**. Every screen shows one thing to do; the joint
