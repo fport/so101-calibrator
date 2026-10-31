@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ai = [  # the optional assistant: Strands Agents for local models, the Anthropic SDK for Claude
+ai = [  # the optional assistant: a Strands agent; anthropic is what Strands' Claude model talks through
     "anthropic>=2.3.0",
     "strands-agents[ollama,openai]>=1.0",
 ]

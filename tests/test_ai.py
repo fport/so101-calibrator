@@ -17,8 +17,10 @@ ANSWER = ["Plug ", "in ", "12 V."]
 
 @pytest.fixture
 def fake_server(monkeypatch):
-    """Speaks enough of the Ollama (/api/*, NDJSON) and OpenAI (/v1/*, SSE) streaming protocols."""
+    """Speaks enough of the Ollama (/api/*, NDJSON), Anthropic (/v1/messages, SSE) and OpenAI (/v1/*, SSE)
+    streaming protocols."""
     seen: list[dict] = []
+    headers: list[dict] = []
     options = {"reject_tools": False}
 
     class H(BaseHTTPRequestHandler):
@@ -40,7 +42,23 @@ def fake_server(monkeypatch):
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
             seen.append(body)
-            if self.path == "/api/chat":
+            headers.append(dict(self.headers))
+            if self.path.startswith("/v1/messages"):
+                msg = {"id": "m", "type": "message", "role": "assistant", "model": body["model"], "content": [],
+                       "stop_reason": None, "stop_sequence": None, "usage": {"input_tokens": 1, "output_tokens": 0}}
+                events = [("message_start", {"type": "message_start", "message": msg}),
+                          ("content_block_start", {"type": "content_block_start", "index": 0,
+                                                   "content_block": {"type": "text", "text": ""}})]
+                events += [("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                                    "delta": {"type": "text_delta", "text": w}})
+                           for w in ("Check ", "the cable.")]
+                events += [("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                           ("message_delta", {"type": "message_delta", "usage": {"output_tokens": 3},
+                                              "delta": {"stop_reason": "end_turn", "stop_sequence": None}}),
+                           ("message_stop", {"type": "message_stop"})]
+                sse = b"".join(f"event: {n}\ndata: {json.dumps(e)}\n\n".encode() for n, e in events)
+                self._send(200, sse, "text/event-stream")
+            elif self.path == "/api/chat":
                 if options["reject_tools"] and body.get("tools"):
                     self._send(400, b'{"error":"registry.ollama.ai/library/tiny:1b does not support tools"}')
                     return
@@ -66,7 +84,9 @@ def fake_server(monkeypatch):
     monkeypatch.setenv("OLLAMA_HOST", url)
     monkeypatch.setenv("SO101CAL_AI_URL", url + "/v1")
     monkeypatch.setenv("OPENAI_API_KEY", "test")
-    yield SimpleNamespace(url=url, seen=seen, options=options)
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", url)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")
+    yield SimpleNamespace(url=url, seen=seen, headers=headers, options=options)
     srv.shutdown()
 
 
@@ -146,35 +166,15 @@ def test_unreachable_server(monkeypatch):
         AI.Assistant("ollama:x").ask("", {})
 
 
-def test_claude_request_shape(monkeypatch):
-    anthropic = pytest.importorskip("anthropic")
-    calls = {}
-
-    class FakeStream:
-        text_stream = iter(["Check ", "the cable."])
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            return False
-
-        def get_final_message(self):
-            return SimpleNamespace(stop_reason="end_turn",
-                                   content=[SimpleNamespace(type="text", text="Check the cable.")])
-
-    class FakeClient:
-        def __init__(self, **kw):
-            self.beta = SimpleNamespace(messages=SimpleNamespace(stream=self.stream))
-
-        def stream(self, **kw):
-            calls.update(kw)
-            return FakeStream()
-
-    monkeypatch.setattr(anthropic, "Anthropic", FakeClient)
-    assert AI.Assistant("claude").ask("", {}) == "Check the cable."
-    assert calls["model"] == AI.CLAUDE_MODEL and calls["fallbacks"] == "default"
-    assert calls["output_config"] == {"effort": "low"} and "server-side-fallback-2026-07-01" in calls["betas"]
+def test_claude_runs_on_strands(fake_server, store):
+    pytest.importorskip("strands")
+    partial: list[str] = []
+    assert AI.Assistant("claude", store=store).ask("", {}, on_text=partial.append) == "Check the cable."
+    assert partial[-1] == "Check the cable."
+    body, headers = fake_server.seen[-1], {k.lower(): v for k, v in fake_server.headers[-1].items()}
+    assert body["model"] == AI.CLAUDE_MODEL and body["output_config"] == {"effort": "low"}
+    assert body["fallbacks"] == "default" and AI.CLAUDE_BETA in headers["anthropic-beta"]
+    assert {t["name"] for t in body["tools"]} == {"calibration_history", "compare_versions"}
 
 
 def test_cli_ai_commands(capsys, fake_server, monkeypatch):

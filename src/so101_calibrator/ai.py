@@ -7,8 +7,8 @@ Off unless configured. A spec is `provider[:model]`:
                           llama.cpp, vLLM) or api.openai.com with $OPENAI_API_KEY
     claude[:model]        Anthropic API, key from ANTHROPIC_API_KEY or `ant auth login`
 
-Local and OpenAI-compatible models run as a Strands agent (strands-agents) with read-only tools over the
-calibration history; Claude runs on the Anthropic SDK. Both come with `pip install "so101-calibrator[ai]"`.
+Every provider runs as a Strands agent (strands-agents) with read-only tools over the calibration history;
+`pip install "so101-calibrator[ai]"` brings it.
 Set the model with `so101-cal ai use <spec>`, `--ai <spec>` or $SO101CAL_AI. The assistant only sees what the
 tool shows (steps, check results, joint readings, stored versions); it has no tool that moves the arm.
 """
@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from . import i18n, settings
@@ -27,6 +27,7 @@ from .store import Store, StoreError
 
 PROVIDERS = ("ollama", "openai", "claude")
 CLAUDE_MODEL = "claude-opus-5-5"
+CLAUDE_BETA = "server-side-fallback-2026-07-01"  # with fallbacks="default": a busy model falls back
 INSTALL_HINT = 'pip install "so101-calibrator[ai]"'
 LANG_NAMES = {"en": "English", "tr": "Turkish"}
 
@@ -135,9 +136,8 @@ def history_tools(store: Store) -> list:
 @dataclass
 class Assistant:
     spec: str
-    store: Store | None = None  # gives local models the history tools
+    store: Store | None = None  # gives the agent the history tools
     timeout: float = 120.0
-    history: list[dict] = field(default_factory=list)  # Claude conversation (Strands keeps its own)
 
     def __post_init__(self):
         self.provider, self.model = parse_spec(self.spec)
@@ -157,13 +157,18 @@ class Assistant:
         language = LANG_NAMES.get(lang or i18n.get_lang(), "English")
         prompt = (f"State:\n{json.dumps(state, separators=(',', ':'))}\n\n"
                   f"Question: {question.strip() or f'(none: explain the current problem, in {language})'}")
-        on_text = on_text or (lambda _: None)
-        if self.provider == "claude":
-            return self._ask_claude(question, prompt, on_text).strip()
-        return self._ask_strands(prompt, on_text).strip()
+        return self._ask_strands(prompt, on_text or (lambda _: None)).strip()
 
-    # --- Strands: Ollama and OpenAI-compatible servers -------------------------------------------------
+    # --- Strands agent: Ollama, OpenAI-compatible servers and Claude -----------------------------------
     def _model(self):
+        if self.provider == "claude":
+            from strands.models.anthropic import AnthropicModel
+
+            return AnthropicModel(client_args={"timeout": self.timeout,
+                                               "default_headers": {"anthropic-beta": CLAUDE_BETA}},
+                                  model_id=self.model, max_tokens=2048,
+                                  params={"output_config": {"effort": "low"},
+                                          "extra_body": {"fallbacks": "default"}})
         if self.provider == "ollama":
             from strands.models.ollama import OllamaModel
 
@@ -207,7 +212,7 @@ class Assistant:
         try:
             import strands  # noqa: F401
         except ImportError as e:
-            raise AIError(f"Local and OpenAI-compatible models need Strands Agents: {INSTALL_HINT}") from e
+            raise AIError(f"The assistant needs Strands Agents: {INSTALL_HINT}") from e
         self._on_text, self._text = on_text, ""
         try:
             if self._agent is None:
@@ -226,49 +231,22 @@ class Assistant:
             raise AIError(_explain(e, self.provider)) from e
         return self._text or str(result)
 
-    # --- Claude: Anthropic SDK -------------------------------------------------------------------------
-    def _ask_claude(self, question: str, prompt: str, on_text: Callable[[str], None]) -> str:
-        try:
-            import anthropic
-        except ImportError as e:
-            raise AIError(f"Claude needs the Anthropic SDK: {INSTALL_HINT}") from e
-        messages = [*self.history[-6:], {"role": "user", "content": prompt}]
-        try:
-            client = anthropic.Anthropic(timeout=self.timeout)
-            with client.beta.messages.stream(
-                model=self.model, max_tokens=2048, system=SYSTEM, messages=messages,
-                output_config={"effort": "low"},
-                betas=["server-side-fallback-2026-07-01"], fallbacks="default",
-            ) as stream:
-                text = ""
-                for chunk in stream.text_stream:
-                    text += chunk
-                    on_text(text)
-                resp = stream.get_final_message()
-        except anthropic.AuthenticationError as e:
-            raise AIError("Anthropic API key rejected: check ANTHROPIC_API_KEY") from e
-        except anthropic.CredentialsError as e:
-            raise AIError("No Anthropic credentials: set ANTHROPIC_API_KEY or run `ant auth login`") from e
-        except anthropic.NotFoundError as e:
-            raise AIError(f"Unknown Claude model '{self.model}'") from e
-        except anthropic.RateLimitError as e:
-            raise AIError("Anthropic rate limit hit: try again in a moment") from e
-        except anthropic.APIStatusError as e:
-            raise AIError(f"Anthropic API error {e.status_code}: {e.message}") from e
-        except anthropic.APIConnectionError as e:
-            raise AIError("Cannot reach the Anthropic API (offline?)") from e
-        if resp.stop_reason == "refusal":
-            raise AIError("Claude declined to answer this one.")
-        answer = "".join(b.text for b in resp.content if b.type == "text")
-        # keep only the question text in history; the next turn carries the fresh state
-        self.history += [{"role": "user", "content": question.strip() or "Explain the current problem."},
-                         {"role": "assistant", "content": answer}]
-        return answer
-
 
 def _explain(e: Exception, provider: str) -> str:
     text = f"{type(e).__name__}: {e}"
     low = text.lower()
+    if provider == "claude":
+        name = type(e).__name__
+        if name == "AuthenticationError":
+            return "Anthropic API key rejected: check ANTHROPIC_API_KEY"
+        if name == "CredentialsError" or "api_key" in low or "auth_token" in low:
+            return "No Anthropic credentials: set ANTHROPIC_API_KEY or run `ant auth login`"
+        if name == "NotFoundError":
+            return "Unknown Claude model (check the model name)"
+        if name in ("RateLimitError", "ModelThrottledException"):
+            return "Anthropic rate limit hit: try again in a moment"
+        if name == "APIConnectionError":
+            return "Cannot reach the Anthropic API (offline?)"
     if provider == "ollama" and ("connect" in low or "refused" in low):
         return "Cannot reach Ollama (is `ollama serve` running?)"
     if "not found" in low and provider == "ollama":

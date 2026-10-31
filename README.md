@@ -43,7 +43,7 @@ step is checked, every failure says what to fix, and every calibration is kept a
 | ✅ **Checked steps** | USB port, motors 1–6, supply voltage, middle pose, ranges, save |
 | 🕘 **Versions** | history, diff, one-key rollback, export to LeRobot |
 | 🦾 **Teleop test** | leader → follower; from the folded rest pose it spots a reversed motor before any torque |
-| 💬 **Assistant** | optional, local ([Strands](https://strandsagents.com) + Ollama) or Claude |
+| 💬 **Assistant** | optional, a [Strands](https://strandsagents.com) agent on a local model (Ollama) or Claude |
 | 🧪 **Mock arm** | try everything without hardware |
 
 <p align="center">
@@ -110,8 +110,8 @@ so101-cal ai use openai:my-model      # LM Studio / llama.cpp / vLLM: URL in $SO
 so101-cal ai use claude               # ANTHROPIC_API_KEY
 ```
 
-Press `a` in the app and ask, or press Enter on an empty line to have the current problem explained. Local
-models run as a Strands agent that can also read the calibration history and compare versions. It only
+Press `a` in the app and ask, or press Enter on an empty line to have the current problem explained. Every
+model runs as a Strands agent that can also read the calibration history and compare versions. It only
 explains: none of its tools can move the arm.
 
 </details>

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The assistant runs on Strands for every provider: Claude now goes through Strands' Anthropic model
+  instead of a separate Anthropic SDK path, so it also gets the read-only history tools.
+
 ## 0.1.5
 
 - **Safety fix for the teleop test (all earlier versions are affected).** wrist_roll was left out of the
